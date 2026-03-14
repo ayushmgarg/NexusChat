@@ -1,4 +1,5 @@
 // src/seed.js — Bootstrap superadmin and default rooms
+require('dotenv').config();  
 const bcrypt = require("bcryptjs");
 const { v4: uuidv4 } = require("uuid");
 const { prepare, init } = require("./db");
