@@ -1,0 +1,872 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>NexusChat — Internal Comms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdn.socket.io/4.7.4/socket.io.min.js"></script>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --bg-base:        #0a0c0f;
+  --bg-surface:     #0f1117;
+  --bg-elevated:    #141820;
+  --bg-hover:       #1a1f2b;
+  --bg-active:      #1e2435;
+  --border:         #1f2535;
+  --border-bright:  #2a3245;
+  --accent:         #00e5a0;
+  --accent-dim:     #00b87d;
+  --accent-glow:    rgba(0,229,160,0.12);
+  --accent-red:     #ff4d6a;
+  --accent-yellow:  #ffd166;
+  --accent-blue:    #5b9cf6;
+  --text-primary:   #e8ecf0;
+  --text-secondary: #7a8599;
+  --text-muted:     #4a5568;
+  --font-mono:      'IBM Plex Mono', monospace;
+  --font-sans:      'IBM Plex Sans', sans-serif;
+  --sidebar-w:      260px;
+  --members-w:      220px;
+  --header-h:       56px;
+}
+
+html, body { height: 100%; overflow: hidden; background: var(--bg-base); color: var(--text-primary); font-family: var(--font-sans); }
+
+/* Auth */
+#auth-screen {
+  display: flex; align-items: center; justify-content: center; height: 100vh;
+  background: var(--bg-base);
+  background-image:
+    radial-gradient(ellipse 80% 60% at 50% -10%, rgba(0,229,160,0.06) 0%, transparent 70%),
+    repeating-linear-gradient(0deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px),
+    repeating-linear-gradient(90deg, transparent, transparent 39px, var(--border) 39px, var(--border) 40px);
+}
+#auth-screen.hidden { display: none; }
+.auth-card {
+  width: 420px; background: var(--bg-surface); border: 1px solid var(--border-bright);
+  border-radius: 10px; padding: 40px 36px;
+  box-shadow: 0 0 60px rgba(0,229,160,0.05), 0 20px 60px rgba(0,0,0,0.5);
+}
+.auth-logo { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+.auth-logo-mark {
+  width: 40px; height: 40px; background: var(--accent); border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-weight: 600; font-size: 18px; color: #000;
+  box-shadow: 0 0 20px var(--accent-glow);
+}
+.auth-logo-text { font-family: var(--font-mono); font-size: 20px; font-weight: 600; }
+.auth-logo-sub  { font-size: 11px; color: var(--text-secondary); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 2px; }
+.auth-tabs { display: flex; margin-bottom: 28px; border-bottom: 1px solid var(--border); }
+.auth-tab {
+  flex: 1; padding: 10px 0; text-align: center; font-family: var(--font-mono); font-size: 13px;
+  cursor: pointer; color: var(--text-muted); border-bottom: 2px solid transparent;
+  transition: all 0.2s; margin-bottom: -1px;
+}
+.auth-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.form-group { margin-bottom: 18px; }
+.form-label { display: block; font-size: 11px; font-family: var(--font-mono); color: var(--text-secondary); letter-spacing: 0.08em; text-transform: uppercase; margin-bottom: 8px; }
+.form-input {
+  width: 100%; background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 4px; padding: 10px 14px; font-family: var(--font-mono); font-size: 14px;
+  color: var(--text-primary); outline: none; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.form-input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-glow); }
+.form-input::placeholder { color: var(--text-muted); }
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 10px 20px; border-radius: 4px; font-family: var(--font-mono); font-size: 13px;
+  font-weight: 500; cursor: pointer; border: none; transition: all 0.15s;
+}
+.btn-primary { background: var(--accent); color: #000; width: 100%; padding: 12px; font-size: 14px; }
+.btn-primary:hover { background: var(--accent-dim); box-shadow: 0 0 20px var(--accent-glow); }
+.btn-ghost { background: transparent; color: var(--text-secondary); border: 1px solid var(--border); }
+.btn-ghost:hover { border-color: var(--border-bright); color: var(--text-primary); background: var(--bg-hover); }
+.error-msg { color: var(--accent-red); font-size: 12px; font-family: var(--font-mono); margin-top: 12px; min-height: 16px; }
+
+/* App shell */
+#app { display: flex; height: 100vh; overflow: hidden; }
+#app.hidden { display: none; }
+
+/* Sidebar */
+#sidebar {
+  width: var(--sidebar-w); background: var(--bg-surface);
+  border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0;
+}
+.sidebar-header {
+  height: var(--header-h); padding: 0 16px;
+  display: flex; align-items: center; justify-content: space-between;
+  border-bottom: 1px solid var(--border); flex-shrink: 0;
+}
+.logo-compact { display: flex; align-items: center; gap: 8px; }
+.logo-mark-sm {
+  width: 26px; height: 26px; background: var(--accent); border-radius: 4px;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-weight: 600; font-size: 13px; color: #000;
+}
+.logo-name { font-family: var(--font-mono); font-size: 14px; font-weight: 600; }
+.sidebar-section { padding: 20px 12px 8px; }
+.sidebar-section-title {
+  font-size: 10px; font-family: var(--font-mono); font-weight: 600; color: var(--text-muted);
+  text-transform: uppercase; letter-spacing: 0.12em; padding: 0 4px; margin-bottom: 6px;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.sidebar-add-btn {
+  width: 18px; height: 18px; display: flex; align-items: center; justify-content: center;
+  border-radius: 3px; cursor: pointer; color: var(--text-muted); transition: all 0.15s;
+  font-size: 16px; line-height: 1;
+}
+.sidebar-add-btn:hover { background: var(--bg-hover); color: var(--accent); }
+.room-list { flex: 1; overflow-y: auto; padding: 0 12px; }
+.room-item {
+  display: flex; align-items: center; gap: 8px; padding: 7px 8px;
+  border-radius: 4px; cursor: pointer; transition: all 0.12s;
+  font-size: 13px; color: var(--text-secondary);
+}
+.room-item:hover { background: var(--bg-hover); color: var(--text-primary); }
+.room-item.active { background: var(--bg-active); color: var(--accent); }
+.room-item-hash { font-family: var(--font-mono); font-size: 16px; color: var(--text-muted); }
+.room-item.active .room-item-hash { color: var(--accent); }
+.room-item-name { flex: 1; }
+.sidebar-user {
+  border-top: 1px solid var(--border); padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px; flex-shrink: 0;
+}
+.avatar {
+  width: 32px; height: 32px; border-radius: 50%; display: flex; align-items: center;
+  justify-content: center; font-family: var(--font-mono); font-size: 13px; font-weight: 600; flex-shrink: 0;
+}
+.avatar-online { box-shadow: 0 0 0 2px var(--bg-surface), 0 0 0 4px var(--accent); }
+.user-info { flex: 1; min-width: 0; }
+.user-name { font-size: 13px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.user-role { font-size: 10px; font-family: var(--font-mono); color: var(--text-secondary); }
+.user-role.superadmin { color: var(--accent-red); }
+.user-role.moderator  { color: var(--accent-yellow); }
+.logout-btn {
+  width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; cursor: pointer; color: var(--text-muted);
+  transition: all 0.15s; background: none; border: none; font-size: 16px;
+}
+.logout-btn:hover { background: var(--bg-hover); color: var(--accent-red); }
+
+/* Main */
+#main { flex: 1; display: flex; flex-direction: column; min-width: 0; }
+.channel-header {
+  height: var(--header-h); padding: 0 24px;
+  display: flex; align-items: center; gap: 16px;
+  border-bottom: 1px solid var(--border); flex-shrink: 0; background: var(--bg-surface);
+}
+.channel-name { font-family: var(--font-mono); font-size: 15px; font-weight: 600; display: flex; align-items: center; gap: 6px; }
+.channel-hash { color: var(--text-muted); font-size: 18px; }
+.channel-desc { font-size: 12px; color: var(--text-secondary); margin-left: 8px; border-left: 1px solid var(--border); padding-left: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.channel-actions { margin-left: auto; }
+.icon-btn {
+  width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
+  border-radius: 4px; cursor: pointer; color: var(--text-secondary);
+  border: none; background: transparent; transition: all 0.15s; font-size: 16px;
+}
+.icon-btn:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+/* Messages */
+#messages-area { flex: 1; overflow-y: auto; padding: 24px 0; display: flex; flex-direction: column; gap: 2px; }
+#messages-area::-webkit-scrollbar { width: 4px; }
+#messages-area::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+.message { display: flex; gap: 12px; padding: 4px 24px; transition: background 0.1s; }
+.message:hover { background: var(--bg-hover); }
+.message.system-msg { background: none; padding: 6px 24px; }
+.message.system-msg:hover { background: none; }
+.msg-avatar {
+  width: 36px; height: 36px; flex-shrink: 0; margin-top: 2px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-family: var(--font-mono); font-size: 14px; font-weight: 600;
+}
+.msg-body { flex: 1; min-width: 0; }
+.msg-header { display: flex; align-items: baseline; gap: 10px; margin-bottom: 3px; }
+.msg-username { font-size: 14px; font-weight: 600; }
+.msg-time { font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); }
+.msg-role-badge {
+  font-size: 9px; font-family: var(--font-mono); font-weight: 600;
+  padding: 1px 5px; border-radius: 3px; text-transform: uppercase; letter-spacing: 0.05em;
+}
+.badge-superadmin { background: rgba(255,77,106,0.15); color: var(--accent-red); border: 1px solid rgba(255,77,106,0.3); }
+.badge-moderator  { background: rgba(255,209,102,0.12); color: var(--accent-yellow); border: 1px solid rgba(255,209,102,0.3); }
+.msg-content { font-size: 14px; line-height: 1.55; color: var(--text-primary); word-break: break-word; white-space: pre-wrap; }
+.system-line {
+  display: flex; align-items: flex-start; gap: 10px; padding: 6px 14px; margin: 4px 8px;
+  background: rgba(0,229,160,0.04); border-left: 2px solid var(--accent);
+  border-radius: 0 4px 4px 0; font-family: var(--font-mono); font-size: 12px;
+  color: var(--text-secondary); white-space: pre-wrap;
+}
+.system-icon { color: var(--accent); flex-shrink: 0; }
+.date-divider {
+  display: flex; align-items: center; gap: 12px; padding: 16px 24px;
+  font-size: 11px; font-family: var(--font-mono); color: var(--text-muted); letter-spacing: 0.08em;
+}
+.date-divider::before, .date-divider::after { content: ''; flex: 1; height: 1px; background: var(--border); }
+.typing-indicator {
+  padding: 4px 24px 8px; font-size: 12px; font-family: var(--font-mono);
+  color: var(--text-muted); min-height: 24px; display: flex; align-items: center; gap: 8px;
+}
+.typing-dots { display: flex; gap: 3px; }
+.typing-dot {
+  width: 4px; height: 4px; background: var(--accent); border-radius: 50%;
+  animation: bounce 1.2s infinite ease-in-out;
+}
+.typing-dot:nth-child(2) { animation-delay: 0.2s; }
+.typing-dot:nth-child(3) { animation-delay: 0.4s; }
+@keyframes bounce {
+  0%,80%,100% { transform: translateY(0); opacity: 0.4; }
+  40%          { transform: translateY(-4px); opacity: 1; }
+}
+
+/* Input */
+.input-area { padding: 12px 24px 20px; border-top: 1px solid var(--border); flex-shrink: 0; background: var(--bg-surface); }
+.input-wrapper {
+  display: flex; align-items: flex-end; gap: 10px;
+  background: var(--bg-elevated); border: 1px solid var(--border);
+  border-radius: 6px; padding: 10px 14px; transition: border-color 0.2s, box-shadow 0.2s;
+}
+.input-wrapper:focus-within { border-color: var(--border-bright); box-shadow: 0 0 0 3px rgba(0,229,160,0.05); }
+#msg-input {
+  flex: 1; background: none; border: none; outline: none;
+  font-family: var(--font-sans); font-size: 14px; color: var(--text-primary);
+  resize: none; max-height: 180px; line-height: 1.5;
+}
+#msg-input::placeholder { color: var(--text-muted); }
+.send-btn {
+  width: 32px; height: 32px; border-radius: 4px; background: var(--accent);
+  border: none; cursor: pointer; display: flex; align-items: center; justify-content: center;
+  color: #000; font-size: 16px; flex-shrink: 0; transition: all 0.15s;
+}
+.send-btn:hover { background: var(--accent-dim); }
+.input-hint { font-size: 11px; color: var(--text-muted); font-family: var(--font-mono); margin-top: 6px; }
+kbd { background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 3px; padding: 1px 5px; font-size: 10px; }
+
+/* Members */
+#members-panel {
+  width: var(--members-w); background: var(--bg-surface);
+  border-left: 1px solid var(--border); display: flex; flex-direction: column;
+  overflow-y: auto; flex-shrink: 0;
+}
+#members-panel.hidden { display: none; }
+.members-header {
+  height: var(--header-h); padding: 0 16px; display: flex; align-items: center;
+  border-bottom: 1px solid var(--border); font-size: 12px; font-family: var(--font-mono);
+  font-weight: 600; color: var(--text-secondary); text-transform: uppercase;
+  letter-spacing: 0.1em; flex-shrink: 0;
+}
+.members-group { padding: 16px 12px 6px; }
+.members-group-title { font-size: 10px; font-family: var(--font-mono); color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 8px; padding: 0 4px; }
+.member-item { display: flex; align-items: center; gap: 8px; padding: 5px 6px; border-radius: 4px; }
+.member-item:hover { background: var(--bg-hover); }
+.avatar-sm { width: 26px; height: 26px; font-size: 11px; }
+.member-name { font-size: 13px; color: var(--text-secondary); flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.member-online { color: var(--text-primary); }
+.online-dot  { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex-shrink: 0; box-shadow: 0 0 6px var(--accent); }
+.offline-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
+
+/* Welcome */
+#welcome-screen {
+  flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  color: var(--text-muted); gap: 12px;
+}
+.welcome-icon  { font-size: 56px; opacity: 0.3; }
+.welcome-title { font-family: var(--font-mono); font-size: 18px; color: var(--text-secondary); }
+.welcome-sub   { font-size: 13px; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  z-index: 1000; backdrop-filter: blur(4px);
+}
+.modal-overlay.hidden { display: none; }
+.modal {
+  background: var(--bg-surface); border: 1px solid var(--border-bright);
+  border-radius: 10px; padding: 28px; width: 400px;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+}
+.modal-title { font-family: var(--font-mono); font-size: 15px; font-weight: 600; margin-bottom: 20px; }
+.modal-actions { display: flex; gap: 10px; margin-top: 24px; justify-content: flex-end; }
+
+/* Connection bar */
+#conn-bar {
+  position: fixed; top: 0; left: 0; right: 0; z-index: 2000;
+  background: var(--accent-red); color: #fff; font-family: var(--font-mono); font-size: 12px;
+  text-align: center; padding: 6px; transform: translateY(-100%); transition: transform 0.3s;
+}
+#conn-bar.visible { transform: translateY(0); }
+
+/* Toasts */
+#toast-container { position: fixed; bottom: 24px; right: 24px; z-index: 3000; display: flex; flex-direction: column; gap: 8px; }
+.toast {
+  background: var(--bg-elevated); border: 1px solid var(--border-bright);
+  border-radius: 4px; padding: 10px 16px; font-family: var(--font-mono); font-size: 12px;
+  color: var(--text-primary); box-shadow: 0 8px 24px rgba(0,0,0,0.4); max-width: 320px;
+  animation: toastIn 0.25s ease-out;
+}
+.toast.success { border-left: 3px solid var(--accent); }
+.toast.error   { border-left: 3px solid var(--accent-red); }
+.toast.info    { border-left: 3px solid var(--accent-blue); }
+@keyframes toastIn { from { opacity: 0; transform: translateX(20px); } to { opacity: 1; transform: translateX(0); } }
+
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+@media (max-width: 900px) { #members-panel { display: none !important; } }
+@media (max-width: 640px) { #sidebar { width: 200px; } }
+</style>
+</head>
+<body>
+
+<div id="conn-bar">Reconnecting to NexusChat...</div>
+<div id="toast-container"></div>
+
+<!-- Auth -->
+<div id="auth-screen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-mark">N</div>
+      <div>
+        <div class="auth-logo-text">NexusChat</div>
+        <div class="auth-logo-sub">Internal Communications Platform</div>
+      </div>
+    </div>
+    <div class="auth-tabs">
+      <div class="auth-tab active" data-tab="login">Sign In</div>
+      <div class="auth-tab" data-tab="register">Register</div>
+    </div>
+    <div id="login-form">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input class="form-input" id="login-user" type="text" placeholder="your_username" autocomplete="username"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" id="login-pass" type="password" placeholder="••••••••" autocomplete="current-password"/>
+      </div>
+      <button class="btn btn-primary" id="login-btn">Sign In</button>
+      <div class="error-msg" id="login-error"></div>
+    </div>
+    <div id="register-form" style="display:none">
+      <div class="form-group">
+        <label class="form-label">Username</label>
+        <input class="form-input" id="reg-user" type="text" placeholder="choose_username" autocomplete="username"/>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Password</label>
+        <input class="form-input" id="reg-pass" type="password" placeholder="min. 6 characters" autocomplete="new-password"/>
+      </div>
+      <button class="btn btn-primary" id="register-btn">Create Account</button>
+      <div class="error-msg" id="reg-error"></div>
+    </div>
+  </div>
+</div>
+
+<!-- App -->
+<div id="app" class="hidden">
+  <div id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo-compact">
+        <div class="logo-mark-sm">N</div>
+        <div class="logo-name">NexusChat</div>
+      </div>
+    </div>
+    <div class="sidebar-section">
+      <div class="sidebar-section-title">
+        Channels
+        <div class="sidebar-add-btn" id="create-room-btn" style="display:none" title="Create Room">+</div>
+      </div>
+    </div>
+    <div class="room-list" id="room-list"></div>
+    <div class="sidebar-user">
+      <div class="avatar avatar-online" id="sidebar-avatar"></div>
+      <div class="user-info">
+        <div class="user-name" id="sidebar-username"></div>
+        <div class="user-role" id="sidebar-role"></div>
+      </div>
+      <button class="logout-btn" id="logout-btn" title="Sign Out">&#x2192;</button>
+    </div>
+  </div>
+
+  <div id="main">
+    <div id="welcome-screen">
+      <div class="welcome-icon">&#x23;</div>
+      <div class="welcome-title">Select a channel</div>
+      <div class="welcome-sub">Pick a room from the sidebar to start messaging</div>
+    </div>
+    <div id="channel-view" style="display:none;flex:1;flex-direction:column;height:100%;">
+      <div class="channel-header">
+        <div class="channel-name">
+          <span class="channel-hash">#</span>
+          <span id="ch-name"></span>
+        </div>
+        <div class="channel-desc" id="ch-desc"></div>
+        <div class="channel-actions">
+          <button class="icon-btn" id="toggle-members" title="Members">&#x1F464;</button>
+        </div>
+      </div>
+      <div id="messages-area"></div>
+      <div class="typing-indicator" id="typing-indicator"></div>
+      <div class="input-area">
+        <div class="input-wrapper">
+          <textarea id="msg-input" rows="1" placeholder="Message — type / for commands"></textarea>
+          <button class="send-btn" id="send-btn">&#x2191;</button>
+        </div>
+        <div class="input-hint"><kbd>Enter</kbd> to send &nbsp;|&nbsp; <kbd>Shift+Enter</kbd> for newline &nbsp;|&nbsp; <kbd>/help</kbd> for commands</div>
+      </div>
+    </div>
+  </div>
+
+  <div id="members-panel">
+    <div class="members-header">Members</div>
+    <div id="members-list"></div>
+  </div>
+</div>
+
+<!-- Create Room Modal -->
+<div class="modal-overlay hidden" id="create-room-modal">
+  <div class="modal">
+    <div class="modal-title">Create New Channel</div>
+    <div class="form-group">
+      <label class="form-label">Channel Name</label>
+      <input class="form-input" id="new-room-name" type="text" placeholder="e.g. backend-team"/>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Description (optional)</label>
+      <input class="form-input" id="new-room-desc" type="text" placeholder="What is this channel about?"/>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost" id="cancel-room-btn">Cancel</button>
+      <button class="btn btn-primary" id="confirm-room-btn" style="width:auto;padding:10px 24px;">Create</button>
+    </div>
+    <div class="error-msg" id="room-error"></div>
+  </div>
+</div>
+
+<script>
+// ── API helper ────────────────────────────────────────────────────────────────
+const API = {
+  async req(method, path, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' }, credentials: 'include' };
+    const token = localStorage.getItem('nc_token');
+    if (token) opts.headers['Authorization'] = `Bearer ${token}`;
+    if (body)  opts.body = JSON.stringify(body);
+    const res  = await fetch('/api' + path, opts);
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(data.error || 'Request failed');
+    return data;
+  },
+  get:   (p)    => API.req('GET',    p),
+  post:  (p, b) => API.req('POST',   p, b),
+  del:   (p)    => API.req('DELETE', p),
+  patch: (p, b) => API.req('PATCH',  p, b),
+};
+
+// ── State ─────────────────────────────────────────────────────────────────────
+let state = {
+  user: null, token: null, socket: null, rooms: [],
+  currentRoom: null, onlineUsers: new Set(),
+  typingUsers: new Map(), typingTimer: null, isTyping: false,
+  membersPanelOpen: true, lastDateSeen: null,
+};
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+function avatarColor(name) {
+  const palette = ['#e05252','#e08952','#d4c94a','#52c47a','#52b8e0','#5273e0','#9952e0','#e05292'];
+  let h = 0;
+  for (const c of name) h = (h * 31 + c.charCodeAt(0)) & 0xffffffff;
+  return palette[Math.abs(h) % palette.length];
+}
+function initials(n)  { return n.slice(0, 2).toUpperCase(); }
+function fmtTime(ts)  { return new Date(ts * 1000).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }); }
+function fmtDate(ts)  {
+  const d = new Date(ts * 1000), t = new Date();
+  if (d.toDateString() === t.toDateString()) return 'Today';
+  const y = new Date(); y.setDate(y.getDate() - 1);
+  if (d.toDateString() === y.toDateString()) return 'Yesterday';
+  return d.toLocaleDateString([], { weekday: 'long', month: 'long', day: 'numeric' });
+}
+function escHtml(s)   { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function isNearBottom() {
+  const a = document.getElementById('messages-area');
+  return a.scrollHeight - a.scrollTop - a.clientHeight < 120;
+}
+function scrollToBottom() {
+  const a = document.getElementById('messages-area');
+  a.scrollTop = a.scrollHeight;
+}
+function toast(msg, type = 'info') {
+  const el = document.createElement('div');
+  el.className = `toast ${type}`;
+  el.textContent = msg;
+  document.getElementById('toast-container').appendChild(el);
+  setTimeout(() => el.remove(), 3500);
+}
+
+// ── Auth UI ───────────────────────────────────────────────────────────────────
+document.querySelectorAll('.auth-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.auth-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    const w = tab.dataset.tab;
+    document.getElementById('login-form').style.display    = w === 'login'    ? '' : 'none';
+    document.getElementById('register-form').style.display = w === 'register' ? '' : 'none';
+  });
+});
+
+document.getElementById('login-btn').addEventListener('click', async () => {
+  const username = document.getElementById('login-user').value.trim();
+  const password = document.getElementById('login-pass').value;
+  const errEl = document.getElementById('login-error');
+  errEl.textContent = '';
+  try { onAuthenticated(await API.post('/auth/login', { username, password })); }
+  catch(e) { errEl.textContent = e.message; }
+});
+
+document.getElementById('register-btn').addEventListener('click', async () => {
+  const username = document.getElementById('reg-user').value.trim();
+  const password = document.getElementById('reg-pass').value;
+  const errEl = document.getElementById('reg-error');
+  errEl.textContent = '';
+  try { onAuthenticated(await API.post('/auth/register', { username, password })); }
+  catch(e) { errEl.textContent = e.message; }
+});
+
+['login-pass','reg-pass'].forEach(id => {
+  document.getElementById(id).addEventListener('keydown', e => {
+    if (e.key === 'Enter')
+      document.getElementById(id === 'login-pass' ? 'login-btn' : 'register-btn').click();
+  });
+});
+
+document.getElementById('logout-btn').addEventListener('click', async () => {
+  await API.post('/auth/logout').catch(() => {});
+  localStorage.removeItem('nc_token');
+  state.socket?.disconnect();
+  state = { ...state, user: null, token: null, socket: null, rooms: [], currentRoom: null };
+  document.getElementById('auth-screen').classList.remove('hidden');
+  document.getElementById('app').classList.add('hidden');
+});
+
+async function onAuthenticated(data) {
+  state.user = data.user;
+  state.token = data.token;
+  localStorage.setItem('nc_token', data.token);
+  document.getElementById('auth-screen').classList.add('hidden');
+  document.getElementById('app').classList.remove('hidden');
+  renderUserBar();
+  await loadRooms();
+  connectSocket();
+}
+
+function renderUserBar() {
+  const u = state.user;
+  const av = document.getElementById('sidebar-avatar');
+  av.textContent = initials(u.username);
+  av.style.background = avatarColor(u.username);
+  document.getElementById('sidebar-username').textContent = u.username;
+  const roleEl = document.getElementById('sidebar-role');
+  roleEl.textContent = u.role;
+  roleEl.className = 'user-role ' + u.role;
+  const canCreate = u.role === 'moderator' || u.role === 'superadmin';
+  document.getElementById('create-room-btn').style.display = canCreate ? '' : 'none';
+}
+
+// ── Rooms ─────────────────────────────────────────────────────────────────────
+async function loadRooms() {
+  const data = await API.get('/rooms');
+  state.rooms = data.rooms;
+  renderRoomList();
+}
+
+function renderRoomList() {
+  const el = document.getElementById('room-list');
+  el.innerHTML = '';
+  for (const room of state.rooms) {
+    const item = document.createElement('div');
+    item.className = 'room-item' + (state.currentRoom?.id === room.id ? ' active' : '');
+    item.dataset.id = room.id;
+    item.innerHTML = `<span class="room-item-hash">#</span><span class="room-item-name">${escHtml(room.name)}</span>`;
+    item.addEventListener('click', () => selectRoom(room));
+    el.appendChild(item);
+  }
+}
+
+async function selectRoom(room) {
+  state.currentRoom = room;
+  state.lastDateSeen = null;
+  renderRoomList();
+  document.getElementById('welcome-screen').style.display = 'none';
+  const cv = document.getElementById('channel-view');
+  cv.style.display = 'flex';
+  document.getElementById('ch-name').textContent = room.name;
+  document.getElementById('ch-desc').textContent = room.description || '';
+  document.getElementById('msg-input').placeholder = `Message #${room.name} — type / for commands`;
+  document.getElementById('messages-area').innerHTML = '';
+
+  state.socket?.emit('room:join', { roomId: room.id }, ({ ok, messages, members, room: r, error }) => {
+    if (error) { toast(error, 'error'); return; }
+    renderMessages(messages);
+    renderMembers(members);
+    scrollToBottom();
+  });
+}
+
+// ── Messages ──────────────────────────────────────────────────────────────────
+function renderMessages(messages) {
+  for (const msg of messages) appendMessage(msg);
+}
+
+function appendMessage(msg) {
+  const area = document.getElementById('messages-area');
+  const dateStr = fmtDate(msg.created_at);
+
+  if (dateStr !== state.lastDateSeen) {
+    state.lastDateSeen = dateStr;
+    const div = document.createElement('div');
+    div.className = 'date-divider';
+    div.textContent = dateStr;
+    area.appendChild(div);
+  }
+
+  const el = document.createElement('div');
+
+  if (msg.type === 'system') {
+    el.className = 'message system-msg';
+    el.innerHTML = `<div class="system-line"><span class="system-icon">&#x25B6;</span><span>${escHtml(msg.content)}</span></div>`;
+  } else {
+    el.className = 'message';
+    el.dataset.msgId = msg.id;
+    const color = avatarColor(msg.username);
+    const badge = msg.role === 'superadmin'
+      ? `<span class="msg-role-badge badge-superadmin">admin</span>`
+      : msg.role === 'moderator'
+      ? `<span class="msg-role-badge badge-moderator">mod</span>`
+      : '';
+    el.innerHTML = `
+      <div class="msg-avatar" style="background:${color}">${initials(msg.username)}</div>
+      <div class="msg-body">
+        <div class="msg-header">
+          <span class="msg-username" style="color:${color}">${escHtml(msg.username)}</span>
+          ${badge}
+          <span class="msg-time">${fmtTime(msg.created_at)}</span>
+        </div>
+        <div class="msg-content">${escHtml(msg.content)}</div>
+      </div>`;
+  }
+  area.appendChild(el);
+}
+
+// ── Members ───────────────────────────────────────────────────────────────────
+function renderMembers(members) {
+  const el = document.getElementById('members-list');
+  el.innerHTML = '';
+  const groups = { superadmin: [], moderator: [], member: [] };
+  for (const m of members) groups[m.role]?.push(m);
+  const labels = { superadmin: 'Admins', moderator: 'Moderators', member: 'Members' };
+
+  for (const [role, list] of Object.entries(groups)) {
+    if (!list.length) continue;
+    const grp = document.createElement('div');
+    grp.className = 'members-group';
+    grp.innerHTML = `<div class="members-group-title">${labels[role]} — ${list.length}</div>`;
+    for (const m of list) {
+      const isOnline = state.onlineUsers.has(m.id);
+      const color = avatarColor(m.username);
+      const item = document.createElement('div');
+      item.className = 'member-item';
+      item.dataset.userId = m.id;
+      item.innerHTML = `
+        <div class="avatar avatar-sm" style="background:${color}">${initials(m.username)}</div>
+        <div class="member-name ${isOnline ? 'member-online' : ''}">${escHtml(m.username)}</div>
+        <div class="${isOnline ? 'online-dot' : 'offline-dot'}"></div>`;
+      grp.appendChild(item);
+    }
+    el.appendChild(grp);
+  }
+}
+
+// ── Input ─────────────────────────────────────────────────────────────────────
+const msgInput = document.getElementById('msg-input');
+
+msgInput.addEventListener('input', () => {
+  msgInput.style.height = 'auto';
+  msgInput.style.height = Math.min(msgInput.scrollHeight, 180) + 'px';
+  if (!state.isTyping && state.currentRoom) {
+    state.isTyping = true;
+    state.socket?.emit('typing:start', { roomId: state.currentRoom.id });
+  }
+  clearTimeout(state.typingTimer);
+  state.typingTimer = setTimeout(() => {
+    state.isTyping = false;
+    state.socket?.emit('typing:stop', { roomId: state.currentRoom?.id });
+  }, 1500);
+});
+
+msgInput.addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
+});
+
+document.getElementById('send-btn').addEventListener('click', sendMessage);
+
+function sendMessage() {
+  const content = msgInput.value.trim();
+  if (!content || !state.currentRoom || !state.socket) return;
+  state.socket.emit('message:send', { roomId: state.currentRoom.id, content }, (res) => {
+    if (res?.error) toast(res.error, 'error');
+  });
+  msgInput.value = '';
+  msgInput.style.height = 'auto';
+  clearTimeout(state.typingTimer);
+  state.isTyping = false;
+  state.socket?.emit('typing:stop', { roomId: state.currentRoom?.id });
+}
+
+document.getElementById('toggle-members').addEventListener('click', () => {
+  state.membersPanelOpen = !state.membersPanelOpen;
+  document.getElementById('members-panel').classList.toggle('hidden', !state.membersPanelOpen);
+});
+
+// ── Create Room Modal ─────────────────────────────────────────────────────────
+document.getElementById('create-room-btn').addEventListener('click', () => {
+  document.getElementById('create-room-modal').classList.remove('hidden');
+  document.getElementById('new-room-name').focus();
+});
+document.getElementById('cancel-room-btn').addEventListener('click', () => {
+  document.getElementById('create-room-modal').classList.add('hidden');
+});
+document.getElementById('confirm-room-btn').addEventListener('click', async () => {
+  const name = document.getElementById('new-room-name').value.trim();
+  const description = document.getElementById('new-room-desc').value.trim();
+  try {
+    await API.post('/rooms', { name, description });
+    document.getElementById('create-room-modal').classList.add('hidden');
+    document.getElementById('new-room-name').value = '';
+    document.getElementById('new-room-desc').value = '';
+    toast(`#${name} created`, 'success');
+  } catch(e) {
+    document.getElementById('room-error').textContent = e.message;
+  }
+});
+
+// ── Socket ────────────────────────────────────────────────────────────────────
+function connectSocket() {
+  if (state.socket?.connected) return;
+  state.socket = io({ auth: { token: state.token }, transports: ['websocket'] });
+
+  state.socket.on('connect', () => {
+    document.getElementById('conn-bar').classList.remove('visible');
+    if (state.currentRoom) {
+      state.socket.emit('room:join', { roomId: state.currentRoom.id }, ({ messages, members }) => {
+        if (!messages) return;
+        document.getElementById('messages-area').innerHTML = '';
+        state.lastDateSeen = null;
+        renderMessages(messages);
+        renderMembers(members);
+        scrollToBottom();
+      });
+    }
+  });
+
+  state.socket.on('disconnect', () => {
+    document.getElementById('conn-bar').classList.add('visible');
+  });
+
+  state.socket.on('message:new', (msg) => {
+    if (msg.room_id !== state.currentRoom?.id) return;
+    const near = isNearBottom();
+    appendMessage(msg);
+    if (near) scrollToBottom();
+  });
+
+  state.socket.on('users:online', ({ userIds }) => {
+    state.onlineUsers = new Set(userIds);
+    document.querySelectorAll('.member-item').forEach(el => {
+      const uid = el.dataset.userId;
+      const online = state.onlineUsers.has(uid);
+      const dot  = el.querySelector('.online-dot, .offline-dot');
+      const name = el.querySelector('.member-name');
+      if (dot)  dot.className = online ? 'online-dot' : 'offline-dot';
+      if (name) name.classList.toggle('member-online', online);
+    });
+  });
+
+  state.socket.on('typing:update', ({ userId, username, typing }) => {
+    const rid = state.currentRoom?.id;
+    if (!rid) return;
+    if (!state.typingUsers.has(rid)) state.typingUsers.set(rid, new Map());
+    if (typing) state.typingUsers.get(rid).set(userId, username);
+    else        state.typingUsers.get(rid).delete(userId);
+    renderTypingIndicator();
+  });
+
+  state.socket.on('kicked', ({ roomId, by }) => {
+    if (state.currentRoom?.id === roomId) {
+      toast(`You were removed from #${state.currentRoom.name} by ${by}`, 'error');
+      state.currentRoom = null;
+      document.getElementById('channel-view').style.display = 'none';
+      document.getElementById('welcome-screen').style.display = '';
+    }
+  });
+
+  state.socket.on('room:created', async (room) => {
+    if (!state.rooms.find(r => r.id === room.id)) {
+      await API.post(`/rooms/${room.id}/join`).catch(() => {});
+      await loadRooms();
+      toast(`New channel: #${room.name}`, 'info');
+    }
+  });
+
+  state.socket.on('room:deleted', async ({ id }) => {
+    if (state.currentRoom?.id === id) {
+      toast('This channel was deleted', 'error');
+      state.currentRoom = null;
+      document.getElementById('channel-view').style.display = 'none';
+      document.getElementById('welcome-screen').style.display = '';
+    }
+    await loadRooms();
+  });
+
+  state.socket.on('room:topicUpdated', ({ roomId, description }) => {
+    if (state.currentRoom?.id === roomId) {
+      document.getElementById('ch-desc').textContent = description;
+      state.currentRoom.description = description;
+    }
+  });
+}
+
+function renderTypingIndicator() {
+  const el  = document.getElementById('typing-indicator');
+  const rid = state.currentRoom?.id;
+  if (!rid) { el.innerHTML = ''; return; }
+  const typers = [...(state.typingUsers.get(rid)?.values() || [])].filter(u => u !== state.user?.username);
+  if (!typers.length) { el.innerHTML = ''; return; }
+  const names = typers.length === 1 ? typers[0]
+    : typers.length === 2 ? typers.join(' and ')
+    : `${typers[0]} and ${typers.length - 1} others`;
+  el.innerHTML = `<div class="typing-dots"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div>${escHtml(names)} ${typers.length === 1 ? 'is' : 'are'} typing...`;
+}
+
+// ── Boot ──────────────────────────────────────────────────────────────────────
+(async () => {
+  const token = localStorage.getItem('nc_token');
+  if (!token) return;
+  try {
+    state.token = token;
+    const data = await API.get('/auth/me');
+    state.user  = data.user;
+    document.getElementById('auth-screen').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    renderUserBar();
+    await loadRooms();
+    connectSocket();
+  } catch {
+    localStorage.removeItem('nc_token');
+  }
+})();
+</script>
+</body>
+</html>
