@@ -1,8 +1,13 @@
-// src/auth.js — JWT utilities and middleware
+// src/auth.js — JWT utilities and Express/Socket middleware (async DB calls)
 const jwt = require("jsonwebtoken");
 const db = require("./db");
 
-const JWT_SECRET = process.env.JWT_SECRET || "nexuschat-dev-secret-change-in-production";
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  console.error("[FATAL] JWT_SECRET is not set. Set it in your .env file.");
+  process.exit(1);
+}
+
 const JWT_EXPIRY = "7d";
 const ROLE_LEVELS = { member: 0, moderator: 1, superadmin: 2 };
 
@@ -18,7 +23,8 @@ function hasRole(userRole, requiredRole) {
   return (ROLE_LEVELS[userRole] ?? -1) >= (ROLE_LEVELS[requiredRole] ?? 99);
 }
 
-function requireAuth(req, res, next) {
+// Express middleware — async
+async function requireAuth(req, res, next) {
   const token =
     req.cookies?.token ||
     (req.headers.authorization?.startsWith("Bearer ")
@@ -29,7 +35,7 @@ function requireAuth(req, res, next) {
 
   try {
     const payload = verifyToken(token);
-    const user = db.prepare("SELECT id, username, role FROM users WHERE id = ?").get(payload.id);
+    const user = await db.prepare("SELECT id, username, role FROM users WHERE id = ?").get(payload.id);
     if (!user) return res.status(401).json({ error: "User not found" });
     req.user = user;
     next();
@@ -39,7 +45,7 @@ function requireAuth(req, res, next) {
 }
 
 function requireRole(role) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "Authentication required" });
     if (!hasRole(req.user.role, role)) {
       return res.status(403).json({ error: `Requires ${role} role or higher` });
@@ -48,16 +54,19 @@ function requireRole(role) {
   };
 }
 
-function socketAuth(socket, next) {
+// Socket.IO middleware — async
+async function socketAuth(socket, next) {
   const token =
     socket.handshake.auth?.token ||
-    socket.handshake.headers?.authorization?.slice(7);
+    (socket.handshake.headers?.authorization?.startsWith("Bearer ")
+      ? socket.handshake.headers.authorization.slice(7)
+      : null);
 
   if (!token) return next(new Error("Authentication required"));
 
   try {
     const payload = verifyToken(token);
-    const user = db.prepare("SELECT id, username, role FROM users WHERE id = ?").get(payload.id);
+    const user = await db.prepare("SELECT id, username, role FROM users WHERE id = ?").get(payload.id);
     if (!user) return next(new Error("User not found"));
     socket.user = user;
     next();
