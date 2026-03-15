@@ -27,7 +27,7 @@ function setupSockets(io) {
 
         // Ensure user is a member (fix: add if missing)
         await db.prepare(
-          "INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?, ?)"
+          "INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
         ).run(roomId, user.id);
 
         socket.join(`room:${roomId}`);

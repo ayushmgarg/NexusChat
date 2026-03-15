@@ -68,7 +68,7 @@ router.post("/auth/register", async (req, res) => {
     const allRooms = await db.prepare("SELECT id FROM rooms").all();
     for (const room of allRooms) {
       await db.prepare(
-        "INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?, ?)"
+        "INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
       ).run(room.id, id);
     }
 
@@ -188,14 +188,14 @@ router.post("/rooms", requireAuth, requireRole("moderator"), async (req, res) =>
 
     // Add creator to room
     await db.prepare(
-      "INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?, ?)"
+      "INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
     ).run(id, req.user.id);
 
     // BUG FIX #3: Also add ALL existing users to new room
     const allUsers = await db.prepare("SELECT id FROM users").all();
     for (const u of allUsers) {
       await db.prepare(
-        "INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?, ?)"
+        "INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
       ).run(id, u.id);
     }
 
@@ -225,7 +225,7 @@ router.post("/rooms/:id/join", requireAuth, async (req, res) => {
   const room = await db.prepare("SELECT id FROM rooms WHERE id = ?").get(req.params.id);
   if (!room) return res.status(404).json({ error: "Room not found" });
   await db.prepare(
-    "INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?, ?)"
+    "INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
   ).run(req.params.id, req.user.id);
   res.json({ ok: true });
 });

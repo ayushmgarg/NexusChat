@@ -1,23 +1,36 @@
-// src/seed.js — Bootstrap superadmin and default rooms
-require('dotenv').config();  
-const bcrypt = require("bcryptjs");
-const { v4: uuidv4 } = require("uuid");
-const { prepare, init } = require("./db");
+const fs   = require('fs');
+const path = require('path');
 
-const SUPERADMIN_USERNAME = process.env.SUPERADMIN_USERNAME || "admin";
-const SUPERADMIN_PASSWORD = process.env.SUPERADMIN_PASSWORD || "Admin@12345";
+// Load .env manually
+try {
+  const envFile = fs.readFileSync(path.join(__dirname, '../.env'), 'utf8')
+    .replace(/^\uFEFF/, '');
+  envFile.split('\n').forEach(line => {
+    line = line.trim().replace(/\r/g, '');
+    if (!line || line.startsWith('#')) return;
+    const [key, ...rest] = line.split('=');
+    if (key && rest.length) process.env[key.trim()] = rest.join('=').trim();
+  });
+} catch(e) {}
+
+const bcrypt = require('bcryptjs');
+const { v4: uuidv4 } = require('uuid');
+const { prepare, init } = require('./db');
+
+const SUPERADMIN_USERNAME = process.env.SUPERADMIN_USERNAME || 'admin';
+const SUPERADMIN_PASSWORD = process.env.SUPERADMIN_PASSWORD || 'admin123';
 
 async function seed() {
   await init();
-  console.log("Seeding...");
+  console.log('Seeding...');
 
   const existing = await prepare(
-    "SELECT id FROM users WHERE username = ?"
+    'SELECT id FROM users WHERE username = ?'
   ).get(SUPERADMIN_USERNAME);
 
   if (existing) {
-    console.log("Superadmin already exists. Skipping.");
-    return;
+    console.log('Superadmin already exists. Skipping.');
+    process.exit(0);
   }
 
   const hash    = bcrypt.hashSync(SUPERADMIN_PASSWORD, 12);
@@ -29,23 +42,23 @@ async function seed() {
   console.log(`Superadmin created: ${SUPERADMIN_USERNAME}`);
 
   const defaultRooms = [
-    { name: "general",     description: "Company-wide announcements and discussions" },
-    { name: "engineering", description: "Technical discussions for the engineering team" },
-    { name: "random",      description: "Off-topic conversations and fun" },
+    { name: 'general',     description: 'Company-wide announcements and discussions' },
+    { name: 'engineering', description: 'Technical discussions for the engineering team' },
+    { name: 'random',      description: 'Off-topic conversations and fun' },
   ];
 
   for (const room of defaultRooms) {
     const roomId = uuidv4();
     await prepare(
-      "INSERT INTO rooms (id, name, description, created_by, is_default) VALUES (?, ?, ?, ?, 1)"
+      'INSERT INTO rooms (id, name, description, created_by, is_default) VALUES (?, ?, ?, ?, 1)'
     ).run(roomId, room.name, room.description, adminId);
     await prepare(
-      "INSERT INTO room_members (room_id, user_id) VALUES (?, ?)"
+      'INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING'
     ).run(roomId, adminId);
     console.log(`Room created: #${room.name}`);
   }
 
-  console.log("Seed complete.");
+  console.log('Seed complete.');
   process.exit(0);
 }
 

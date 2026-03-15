@@ -1,10 +1,23 @@
 // src/server.js — Entry point
-require('dotenv').config();
+const fs = require('fs');
+const path = require('path');
+
+// Load .env manually
+try {
+  const envFile = fs.readFileSync(path.join(__dirname, '../.env'), 'utf8')
+    .replace(/^\uFEFF/, ''); // strip BOM if present
+  envFile.split('\n').forEach(line => {
+    line = line.trim().replace(/\r/g, '');
+    if (!line || line.startsWith('#')) return;
+    const [key, ...rest] = line.split('=');
+    if (key && rest.length) process.env[key.trim()] = rest.join('=').trim();
+  });
+} catch(e) { console.log('ENV ERROR:', e.message); }
 const express      = require("express");
 const http         = require("http");
 const { Server }   = require("socket.io");
 const cookieParser = require("cookie-parser");
-const path         = require("path");
+// path is already required above, do NOT require it again
 
 const { init }          = require("./db");
 const routes            = require("./routes");

@@ -127,14 +127,14 @@ const COMMANDS = {
       const roomId      = uuidv4();
       const description = descParts.join(" ") || "";
       await db.prepare(
-        "INSERT INTO rooms (id, name, description, created_by) VALUES (?, ?, ?, ?)"
+        "INSERT INTO rooms (id, name, description, created_by) VALUES (?, ?, ?, ?) ON CONFLICT DO NOTHING"
       ).run(roomId, slug, description, user.id);
 
       // Add all existing users to new room
       const allUsers = await db.prepare("SELECT id FROM users").all();
       for (const u of allUsers) {
         await db.prepare(
-          "INSERT OR IGNORE INTO room_members (room_id, user_id) VALUES (?, ?)"
+          "INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
         ).run(roomId, u.id);
       }
 
