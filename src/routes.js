@@ -1,6 +1,6 @@
 // src/routes.js — All REST endpoints (fully async for LibSQL/Turso)
 const express = require("express");
-const bcrypt  = require("bcryptjs");
+const bcrypt = require("bcryptjs");
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const { signToken, requireAuth, requireRole } = require("./auth");
@@ -8,31 +8,65 @@ const { signToken, requireAuth, requireRole } = require("./auth");
 const router = express.Router();
 
 // ── Invite code validation ────────────────────────────────────────────────────
+// ── Invite code validation ────────────────────────────────────────────────────
 async function validateInvite(code) {
-  if (process.env.REQUIRE_INVITE !== "true") return { ok: true };
-  if (!code) return { ok: false, error: "An invite code is required to register" };
+  // If REQUIRE_INVITE is true, a valid code is mandatory
+  if (process.env.REQUIRE_INVITE === "true") {
+    if (!code || code.trim() === "") {
+      return { ok: false, error: "An invite code is required to register" };
+    }
+    const row = await db.prepare(
+      "SELECT * FROM invite_codes WHERE code = ?"
+    ).get(code.trim().toUpperCase());
 
-  const row = await db.prepare("SELECT * FROM invite_codes WHERE code = ?").get(code);
-  if (!row) return { ok: false, error: "Invalid invite code" };
-  if (row.uses_max !== -1 && row.uses_count >= row.uses_max) {
-    return { ok: false, error: "This invite code has already been fully used" };
+    if (!row) {
+      return { ok: false, error: "Invalid invite code" };
+    }
+    if (row.uses_max !== -1 && row.uses_count >= row.uses_max) {
+      return { ok: false, error: "This invite code has already been fully used" };
+    }
+    return { ok: true, row };
   }
-  return { ok: true, row };
+
+  // REQUIRE_INVITE is false — but if a code IS provided, still validate it
+  if (code && code.trim() !== "") {
+    const row = await db.prepare(
+      "SELECT * FROM invite_codes WHERE code = ?"
+    ).get(code.trim().toUpperCase());
+
+    if (!row) {
+      return { ok: false, error: "Invalid invite code" };
+    }
+    if (row.uses_max !== -1 && row.uses_count >= row.uses_max) {
+      return { ok: false, error: "This invite code has already been fully used" };
+    }
+    return { ok: true, row };
+  }
+
+  // No code provided and not required — allow through
+  return { ok: true };
 }
 
 async function consumeInvite(code) {
+  if (!code) return;
   await db.prepare(
     "UPDATE invite_codes SET uses_count = uses_count + 1 WHERE code = ?"
-  ).run(code);
+  ).run(code.trim().toUpperCase());
 }
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 // Validate invite code without registering (for frontend to check on page load)
 router.get("/auth/invite/:code", async (req, res) => {
-  const result = await validateInvite(req.params.code);
-  if (!result.ok) return res.status(400).json({ error: result.error });
-  const row = result.row || {};
+  const code = req.params.code.trim().toUpperCase();
+  const row = await db.prepare(
+    "SELECT * FROM invite_codes WHERE code = ?"
+  ).get(code);
+
+  if (!row) return res.status(400).json({ error: "Invalid invite code" });
+  if (row.uses_max !== -1 && row.uses_count >= row.uses_max) {
+    return res.status(400).json({ error: "This invite code has been fully used" });
+  }
   res.json({ ok: true, label: row.label || "" });
 });
 
@@ -40,11 +74,10 @@ router.post("/auth/register", async (req, res) => {
   try {
     const { username, password, inviteCode } = req.body;
 
-    // Invite check
+    // Invite check — runs before anything else
     const inviteResult = await validateInvite(inviteCode);
     if (!inviteResult.ok) return res.status(403).json({ error: inviteResult.error });
 
-    // Input validation
     if (!username || !password)
       return res.status(400).json({ error: "Username and password required" });
     if (username.length < 3 || username.length > 20)
@@ -54,17 +87,19 @@ router.post("/auth/register", async (req, res) => {
     if (password.length < 6)
       return res.status(400).json({ error: "Password must be at least 6 characters" });
 
-    const existing = await db.prepare("SELECT id FROM users WHERE username = ?").get(username);
+    const existing = await db.prepare(
+      "SELECT id FROM users WHERE username = ?"
+    ).get(username);
     if (existing) return res.status(409).json({ error: "Username already taken" });
 
     const hash = bcrypt.hashSync(password, 12);
-    const id   = uuidv4();
+    const id = uuidv4();
 
     await db.prepare(
       "INSERT INTO users (id, username, password, role) VALUES (?, ?, ?, 'member')"
     ).run(id, username, hash);
 
-    // BUG FIX #1: Join ALL rooms, not just default ones
+    // Join ALL rooms
     const allRooms = await db.prepare("SELECT id FROM rooms").all();
     for (const room of allRooms) {
       await db.prepare(
@@ -72,8 +107,8 @@ router.post("/auth/register", async (req, res) => {
       ).run(room.id, id);
     }
 
-    // Consume invite
-    if (process.env.REQUIRE_INVITE === "true" && inviteCode) {
+    // Consume invite code
+    if (inviteCode && inviteCode.trim() !== "") {
       await consumeInvite(inviteCode);
     }
 
@@ -81,7 +116,6 @@ router.post("/auth/register", async (req, res) => {
     res.cookie("token", token, {
       httpOnly: true, sameSite: "lax", maxAge: 7 * 24 * 3600 * 1000,
     });
-    // BUG FIX #2: Return full user object so frontend can auto sign-in
     res.json({ token, user: { id, username, role: "member" } });
   } catch (e) {
     console.error("[register]", e);
@@ -239,7 +273,7 @@ router.get("/rooms/:id/messages", requireAuth, async (req, res) => {
   ).get(req.params.id, req.user.id);
   if (!member) return res.status(403).json({ error: "You are not a member of this room" });
 
-  const limit  = Math.min(parseInt(req.query.limit) || 50, 200);
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const before = req.query.before ? parseInt(req.query.before) : Math.floor(Date.now() / 1000) + 1;
 
   const messages = (await db.prepare(
