@@ -7,7 +7,7 @@ RUN npm install
 
 COPY . .
 
-RUN mkdir -p /app/data
+ENV PORT=7860
 
 EXPOSE 7860
 
