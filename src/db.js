@@ -10,6 +10,7 @@ if (DATABASE_URL) {
   pool = new Pool({
     connectionString: DATABASE_URL,
     ssl: { rejectUnauthorized: false },
+    family:4,
   });
   console.log('[DB] Supabase PostgreSQL');
 } else {
