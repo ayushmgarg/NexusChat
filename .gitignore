@@ -4,4 +4,3 @@ data/.env
 *.db-shm
 *.db-wal
 .env
-readme.md
