@@ -661,6 +661,6 @@ module.exports = function createRouter(io) {
       res.status(500).json({ error: "Failed to delete role" });
     }
   });
-
+  router.get('/health', (req, res) => res.json({ ok: true }));
   return router;
 };
