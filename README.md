@@ -2,7 +2,7 @@
 
 A lightweight internal real-time messaging platform with role-based access control, built for engineering organizations that need a controlled, self-hosted communication environment.
 
-![NexusChat](https://img.shields.io/badge/NexusChat-v1.0.0-00e5a0?style=for-the-badge)
+![NexusChat](https://img.shields.io/badge/NexusChat-v2.0.0-00e5a0?style=for-the-badge)
 ![Node.js](https://img.shields.io/badge/Node.js-20-339933?style=for-the-badge&logo=nodedotjs)
 ![Socket.IO](https://img.shields.io/badge/Socket.IO-4.7-010101?style=for-the-badge&logo=socketdotio)
 ![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL-3ECF8E?style=for-the-badge&logo=supabase)
@@ -12,7 +12,7 @@ A lightweight internal real-time messaging platform with role-based access contr
 
 ## Live Demo
 
-🟢 **[https://ayushg10-nexuschat.hf.space](https://ayushg10-nexuschat.hf.space)**
+🟢 **[https://nexuschat.onrender.com](https://nexuschat-bt6k.onrender.com/)**
 
 > Login with a registered account or contact the admin for an invite code.
 
@@ -20,23 +20,28 @@ A lightweight internal real-time messaging platform with role-based access contr
 
 ## What is NexusChat
 
-NexusChat is a controlled internal messaging system where not everyone holds equal power. It has a strict role hierarchy, invite-only registration support, real-time messaging across multiple channels, slash commands, typing indicators, and online presence tracking — all in a single deployable Node.js app with no external dependencies beyond a PostgreSQL database.
+NexusChat is a controlled internal messaging system where not everyone holds equal power. It has a strict role hierarchy, invite-only registration support, real-time messaging across multiple channels, file and image sharing, @mentions, in-app notifications, slash commands, typing indicators, and online presence tracking — all in a single deployable Node.js app with no external dependencies beyond a PostgreSQL database.
 
 ---
 
 ## Features
 
-- Real-time messaging via WebSockets (Socket.IO)
-- Three-tier role system: `superadmin`, `moderator`, `member`
-- Multi-room channel support
+- Real-time messaging via WebSockets (Socket.IO) with polling fallback
+- Custom role system with granular permissions (create, edit, delete roles)
+- Display names — users can set a name separate from their username
+- Multi-room channel support with browse/join/leave
+- File and image upload — compressed client-side, stored in PostgreSQL, cached in IndexedDB
+- @mention autocomplete with notifications and unread badge
+- In-app notification sound + unread counts per channel + tab title badge
+- Right-click context menu on users (kick, promote, change display name, copy username)
 - Slash command system (extensible)
 - Typing indicators and online presence
 - Invite code system with shareable links
 - JWT authentication with HTTP-only cookies
-- Persistent message history via Supabase PostgreSQL
+- Persistent message history with infinite scroll (load older messages)
 - Single-file frontend — no build step, no bundler
 - Docker support for one-command deployment
-- Deployed on Hugging Face Spaces (free, always on)
+- Deployed on Render
 
 ---
 
@@ -50,7 +55,7 @@ NexusChat is a controlled internal messaging system where not everyone holds equ
 | Database | Supabase (PostgreSQL) |
 | Auth | JWT + bcrypt |
 | Frontend | Vanilla HTML/CSS/JS (single file) |
-| Deployment | Hugging Face Spaces (Docker) |
+| Deployment | Render |
 
 ---
 
@@ -67,7 +72,6 @@ nexuschat/
 │   └── seed.js        # Database seeder
 ├── public/
 │   └── index.html     # Complete single-file SPA frontend
-├── data/              # Local SQLite fallback (auto-created)
 ├── .env.example       # Environment variable template
 ├── Dockerfile         # Container definition
 ├── docker-compose.yml # Local Docker Compose setup
@@ -78,16 +82,23 @@ nexuschat/
 
 ## Role System
 
+Roles are fully customizable — superadmins can create, edit, and delete custom roles with any combination of permissions. Three system roles ship by default and cannot be deleted.
+
 | Capability | member | moderator | superadmin |
 |---|:---:|:---:|:---:|
 | Send messages | yes | yes | yes |
-| Join rooms | yes | yes | yes |
+| Browse and join rooms | yes | yes | yes |
+| Leave rooms | yes | yes | yes |
+| Upload files / images | yes | yes | yes |
+| @mention users | yes | yes | yes |
 | Create rooms | | yes | yes |
 | Kick users | | yes | yes |
 | Update room topic | | yes | yes |
 | Delete rooms | | | yes |
 | Promote / demote users | | | yes |
 | Generate invite codes | | | yes |
+| Manage roles | | | yes |
+| Change others' display names | | | yes |
 
 ---
 
@@ -124,11 +135,13 @@ All endpoints are prefixed with `/api`.
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/rooms` | yes | List all rooms |
+| GET | `/rooms` | yes | List joined rooms |
+| GET | `/rooms/browse` | yes | List all rooms with membership flag |
 | POST | `/rooms` | moderator | Create a room |
 | DELETE | `/rooms/:id` | superadmin | Delete a room |
 | POST | `/rooms/:id/join` | yes | Join a room |
-| GET | `/rooms/:id/messages` | yes | Get message history |
+| POST | `/rooms/:id/leave` | yes | Leave a room |
+| GET | `/rooms/:id/messages` | yes | Get message history (paginated) |
 | GET | `/rooms/:id/members` | yes | Get room members |
 
 ### Invites
@@ -143,8 +156,18 @@ All endpoints are prefixed with `/api`.
 
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
-| GET | `/users` | moderator | List all users |
-| PATCH | `/users/:id/role` | superadmin | Change a user's role |
+| GET | `/users` | yes | List all users |
+| PATCH | `/users/:id/role` | can_promote | Change a user's role |
+| PATCH | `/users/:id/display-name` | yes (self or can_change_display_names) | Set display name |
+
+### Roles
+
+| Method | Endpoint | Auth | Description |
+|---|---|---|---|
+| GET | `/roles` | yes | List all roles |
+| POST | `/roles` | can_manage_roles | Create a custom role |
+| PATCH | `/roles/:id` | can_manage_roles | Update a role |
+| DELETE | `/roles/:id` | can_manage_roles | Delete a custom role |
 
 ---
 
@@ -155,8 +178,9 @@ All endpoints are prefixed with `/api`.
 | Event | Payload | Description |
 |---|---|---|
 | `room:join` | `{ roomId }` | Join a room and receive history |
-| `room:leave` | `{ roomId }` | Leave a room |
-| `message:send` | `{ roomId, content }` | Send a message or command |
+| `room:leave` | `{ roomId }` | Leave socket room (UI only) |
+| `message:send` | `{ roomId, content, attachment? }` | Send a message, command, or file |
+| `room:markRead` | `{ roomId }` | Mark room as read |
 | `typing:start` | `{ roomId }` | Notify typing started |
 | `typing:stop` | `{ roomId }` | Notify typing stopped |
 
@@ -171,6 +195,10 @@ All endpoints are prefixed with `/api`.
 | `room:created` | room object | A new room was created |
 | `room:deleted` | `{ id }` | A room was deleted |
 | `room:topicUpdated` | `{ roomId, description }` | Room topic changed |
+| `member:joined` | `{ roomId, member }` | A user joined the room |
+| `member:left` | `{ roomId, userId, username }` | A user left or was kicked |
+| `member:updated` | user object | A user's role or display name changed |
+| `mention:new` | `{ roomId, roomName, fromUsername, preview }` | You were @mentioned |
 
 ---
 
@@ -179,12 +207,12 @@ All endpoints are prefixed with `/api`.
 ### Requirements
 
 - Node.js 20+
-- A Supabase account (free) or local SQLite fallback
+- A Supabase account (free)
 
 ### Steps
 ```bash
 # 1. Clone the repo
-git clone https://github.com/ayushg10/nexuschat.git
+git clone https://github.com/ayushmgarg/nexuschat.git
 cd nexuschat
 
 # 2. Install dependencies
@@ -196,8 +224,6 @@ $content = @"
 PORT=3000
 JWT_SECRET=your-secret-here
 DATABASE_URL=postgresql://...your-supabase-url...
-SUPERADMIN_USERNAME=admin
-SUPERADMIN_PASSWORD=yourpassword
 REQUIRE_INVITE=false
 CORS_ORIGIN=*
 "@
@@ -210,7 +236,7 @@ npm run seed
 npm start
 ```
 
-Open `http://localhost:3000` and log in with your admin credentials.
+Open `http://localhost:3000` and register. Promote yourself to superadmin via the seed script or directly in Supabase.
 
 ---
 
@@ -219,12 +245,11 @@ Open `http://localhost:3000` and log in with your admin credentials.
 | Variable | Required | Description |
 |---|---|---|
 | `JWT_SECRET` | yes | Secret for signing JWT tokens — use a long random string |
-| `DATABASE_URL` | yes | Supabase PostgreSQL connection string |
+| `DATABASE_URL` | yes | Supabase PostgreSQL connection string (use session pooler, port 5432) |
 | `PORT` | no | Server port (default: 3000) |
-| `SUPERADMIN_USERNAME` | no | Admin username (default: admin) |
-| `SUPERADMIN_PASSWORD` | no | Admin password (default: Admin@12345) |
 | `REQUIRE_INVITE` | no | Set to `true` to require invite codes to register |
-| `CORS_ORIGIN` | no | Allowed CORS origin (default: *) |
+| `CORS_ORIGIN` | no | Allowed CORS origin — set to your deployed URL in production |
+| `NODE_ENV` | no | Set to `production` on hosted deployments |
 
 Generate a secure JWT secret:
 ```bash
@@ -235,17 +260,15 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 ## Deployment
 
-### Hugging Face Spaces (current — free, always on)
+### Render (current — free tier)
 
-1. Fork this repository
-2. Create a new Space at `https://huggingface.co/new-space`
-3. Select **Docker** as the SDK
-4. Go to Space **Settings** → **Repository secrets** and add all environment variables
-5. Push your code to the Space:
-```bash
-git remote add hf https://YOUR_USERNAME:YOUR_HF_TOKEN@huggingface.co/spaces/YOUR_USERNAME/nexuschat
-git push hf main
-```
+1. Push repo to GitHub
+2. Go to [render.com](https://render.com) → New → Web Service → connect repo
+3. Set build command: `npm install`, start command: `node src/server.js`
+4. Add environment variables: `DATABASE_URL`, `JWT_SECRET`, `CORS_ORIGIN`, `REQUIRE_INVITE`, `NODE_ENV`
+5. Deploy
+
+> **Note:** Render free tier spins down after 15 min of inactivity. Use [cron-job.org](https://cron-job.org) to ping your URL every 10 minutes to keep it warm.
 
 ### Docker (self-hosted)
 ```bash
@@ -260,6 +283,12 @@ npm start
 # In a second terminal
 cloudflared tunnel --url http://localhost:3000
 ```
+
+---
+
+## File Upload
+
+Images are compressed client-side (max 800px width, JPEG 0.6 quality) before sending, keeping payloads under 150KB typically. Files up to 3MB are supported. Attachments are stored as base64 JSON in the `messages` table and cached in browser IndexedDB after first load — subsequent views are instant without re-fetching from the server.
 
 ---
 
