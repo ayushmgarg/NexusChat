@@ -23,6 +23,25 @@ function hasRole(userRole, requiredRole) {
   return (ROLE_LEVELS[userRole] ?? -1) >= (ROLE_LEVELS[requiredRole] ?? 99);
 }
 
+// Check if user has a specific permission based on their role's permissions JSON
+function hasPermission(user, permName) {
+  if (!user) return false;
+  // If permissions object is already parsed and attached
+  if (user.permissions && user.permissions[permName]) return true;
+  // Fallback: check role_permissions string
+  if (user.role_permissions) {
+    try {
+      const perms = typeof user.role_permissions === 'string'
+        ? JSON.parse(user.role_permissions)
+        : user.role_permissions;
+      return !!perms[permName];
+    } catch {
+      return false;
+    }
+  }
+  return false;
+}
+
 // Express middleware — async
 async function requireAuth(req, res, next) {
   const token =
@@ -35,8 +54,24 @@ async function requireAuth(req, res, next) {
 
   try {
     const payload = verifyToken(token);
-    const user = await db.prepare("SELECT id, username, role FROM users WHERE id = ?").get(payload.id);
+    const user = await db.prepare(
+      `SELECT u.id, u.username, u.display_name, u.role, u.role_id,
+              r.name as role_name, r.color as role_color, r.level as role_level, r.permissions as role_permissions
+       FROM users u
+       LEFT JOIN roles r ON r.id = u.role_id
+       WHERE u.id = ?`
+    ).get(payload.id);
     if (!user) return res.status(401).json({ error: "User not found" });
+
+    // Parse permissions from JSON string to object
+    try {
+      user.permissions = user.role_permissions
+        ? (typeof user.role_permissions === 'string' ? JSON.parse(user.role_permissions) : user.role_permissions)
+        : {};
+    } catch {
+      user.permissions = {};
+    }
+
     req.user = user;
     next();
   } catch {
@@ -47,8 +82,22 @@ async function requireAuth(req, res, next) {
 function requireRole(role) {
   return async (req, res, next) => {
     if (!req.user) return res.status(401).json({ error: "Authentication required" });
-    if (!hasRole(req.user.role, role)) {
+    // Check using role_level from DB first, then fall back to ROLE_LEVELS
+    const userLevel = req.user.role_level !== undefined ? req.user.role_level : (ROLE_LEVELS[req.user.role] ?? -1);
+    const requiredLevel = ROLE_LEVELS[role] ?? 99;
+    if (userLevel < requiredLevel) {
       return res.status(403).json({ error: `Requires ${role} role or higher` });
+    }
+    next();
+  };
+}
+
+// Permission-based middleware
+function requirePermission(permName) {
+  return async (req, res, next) => {
+    if (!req.user) return res.status(401).json({ error: "Authentication required" });
+    if (!hasPermission(req.user, permName)) {
+      return res.status(403).json({ error: `Requires '${permName}' permission` });
     }
     next();
   };
@@ -66,8 +115,24 @@ async function socketAuth(socket, next) {
 
   try {
     const payload = verifyToken(token);
-    const user = await db.prepare("SELECT id, username, role FROM users WHERE id = ?").get(payload.id);
+    const user = await db.prepare(
+      `SELECT u.id, u.username, u.display_name, u.role, u.role_id,
+              r.name as role_name, r.color as role_color, r.level as role_level, r.permissions as role_permissions
+       FROM users u
+       LEFT JOIN roles r ON r.id = u.role_id
+       WHERE u.id = ?`
+    ).get(payload.id);
     if (!user) return next(new Error("User not found"));
+
+    // Parse permissions from JSON string to object
+    try {
+      user.permissions = user.role_permissions
+        ? (typeof user.role_permissions === 'string' ? JSON.parse(user.role_permissions) : user.role_permissions)
+        : {};
+    } catch {
+      user.permissions = {};
+    }
+
     socket.user = user;
     next();
   } catch {
@@ -75,4 +140,4 @@ async function socketAuth(socket, next) {
   }
 }
 
-module.exports = { signToken, verifyToken, hasRole, requireAuth, requireRole, socketAuth, ROLE_LEVELS };
+module.exports = { signToken, verifyToken, hasRole, hasPermission, requireAuth, requireRole, requirePermission, socketAuth, ROLE_LEVELS };

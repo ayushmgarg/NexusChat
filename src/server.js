@@ -36,10 +36,12 @@ async function start() {
     cors: { origin: CORS_ORIGIN, methods: ["GET", "POST"], credentials: true },
     pingTimeout: 60000,
     pingInterval: 25000,
+    transports: ['websocket', 'polling'],
+    maxHttpBufferSize: 5e6,
   });
 
   // ── Middleware ──────────────────────────────────────────────────────────
-  app.use(express.json({ limit: "1mb" }));
+  app.use(express.json({ limit: "5mb" }));
   app.use(cookieParser());
 
   // Security headers
@@ -68,8 +70,18 @@ async function start() {
     next();
   });
 
+  // Rate limiter cleanup
+  setInterval(() => {
+    const now = Date.now();
+    for (const [ip, reqs] of rateLimitMap) {
+      const filtered = reqs.filter(t => now - t < 60000);
+      if (filtered.length === 0) rateLimitMap.delete(ip);
+      else rateLimitMap.set(ip, filtered);
+    }
+  }, 60000);
+
   // ── Routes ──────────────────────────────────────────────────────────────
-  app.use("/api", routes);
+  app.use("/api", routes(io));
   app.use(express.static(path.join(__dirname, "../public")));
   app.get("*", (req, res) => {
     res.sendFile(path.join(__dirname, "../public/index.html"));

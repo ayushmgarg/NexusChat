@@ -1,6 +1,7 @@
 const fs   = require('fs');
 const path = require('path');
 const { Pool } = require('pg');
+const { v4: uuidv4 } = require('uuid');
 
 const DATABASE_URL = process.env.DATABASE_URL;
 
@@ -65,6 +66,31 @@ const SCHEMA = `
 
   CREATE INDEX IF NOT EXISTS idx_messages_room ON messages(room_id, created_at);
   CREATE INDEX IF NOT EXISTS idx_room_members_user ON room_members(user_id);
+
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS display_name TEXT DEFAULT NULL;
+  ALTER TABLE users ADD COLUMN IF NOT EXISTS role_id TEXT DEFAULT NULL;
+
+  ALTER TABLE messages ADD COLUMN IF NOT EXISTS attachment TEXT DEFAULT NULL;
+  ALTER TABLE messages ADD COLUMN IF NOT EXISTS mentions TEXT DEFAULT NULL;
+
+  CREATE TABLE IF NOT EXISTS roles (
+    id          TEXT PRIMARY KEY,
+    name        TEXT UNIQUE NOT NULL,
+    level       INTEGER NOT NULL DEFAULT 0,
+    color       TEXT NOT NULL DEFAULT '#8b949e',
+    permissions TEXT NOT NULL DEFAULT '{}',
+    is_system   INTEGER NOT NULL DEFAULT 0,
+    created_by  TEXT,
+    created_at  BIGINT NOT NULL DEFAULT EXTRACT(EPOCH FROM NOW())::BIGINT
+  );
+
+  CREATE TABLE IF NOT EXISTS user_room_state (
+    user_id      TEXT NOT NULL,
+    room_id      TEXT NOT NULL,
+    last_read_at BIGINT DEFAULT 0,
+    muted        INTEGER DEFAULT 0,
+    PRIMARY KEY(user_id, room_id)
+  );
 `;
 
 async function init() {
@@ -78,6 +104,49 @@ async function init() {
     await pool.query(sql);
   }
   console.log('[DB] Schema ready');
+
+  // Seed default system roles if they don't exist
+  const defaultRoles = [
+    {
+      name: 'member',
+      level: 0,
+      color: '#8b949e',
+      permissions: '{}',
+      is_system: 1,
+    },
+    {
+      name: 'moderator',
+      level: 1,
+      color: '#e5c23a',
+      permissions: '{"can_kick":true,"can_create_rooms":true,"can_change_topic":true}',
+      is_system: 1,
+    },
+    {
+      name: 'superadmin',
+      level: 2,
+      color: '#f85149',
+      permissions: '{"can_kick":true,"can_create_rooms":true,"can_change_topic":true,"can_delete_rooms":true,"can_manage_roles":true,"can_manage_invites":true,"can_promote":true,"can_change_display_names":true}',
+      is_system: 1,
+    },
+  ];
+
+  for (const role of defaultRoles) {
+    const existing = await pool.query('SELECT id FROM roles WHERE name = $1', [role.name]);
+    if (existing.rows.length === 0) {
+      const id = uuidv4();
+      await pool.query(
+        'INSERT INTO roles (id, name, level, color, permissions, is_system) VALUES ($1, $2, $3, $4, $5, $6)',
+        [id, role.name, role.level, role.color, role.permissions, role.is_system]
+      );
+      console.log(`[DB] Seeded role: ${role.name}`);
+    }
+  }
+
+  // Migration: set role_id for users that don't have one yet
+  await pool.query(
+    'UPDATE users SET role_id = (SELECT id FROM roles WHERE name = users.role) WHERE role_id IS NULL'
+  );
+  console.log('[DB] Role migration complete');
 }
 
 // prepare() — same API as before, works with pg

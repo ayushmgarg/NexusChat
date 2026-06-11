@@ -41,6 +41,13 @@ async function seed() {
   ).run(adminId, SUPERADMIN_USERNAME, hash);
   console.log(`Superadmin created: ${SUPERADMIN_USERNAME}`);
 
+  // Set role_id for the superadmin user
+  const adminRole = await prepare('SELECT id FROM roles WHERE name = ?').get('superadmin');
+  if (adminRole) {
+    await prepare('UPDATE users SET role_id = ? WHERE id = ?').run(adminRole.id, adminId);
+    console.log('Superadmin role_id set.');
+  }
+
   const defaultRooms = [
     { name: 'general',     description: 'Company-wide announcements and discussions' },
     { name: 'engineering', description: 'Technical discussions for the engineering team' },

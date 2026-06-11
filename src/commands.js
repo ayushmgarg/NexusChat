@@ -1,3 +1,4 @@
+// src/commands.js — Slash command handlers (async DB calls)
 const { v4: uuidv4 } = require("uuid");
 const db = require("./db");
 const { hasRole } = require("./auth");
@@ -7,9 +8,8 @@ const COMMANDS = {
     description: "List all available commands",
     minRole: "member",
     async handler({ user }) {
-      const role = user.role;
-      const isMod = role === 'moderator' || role === 'superadmin';
-      const isAdmin = role === 'superadmin';
+      const isMod = user.permissions?.can_kick || user.permissions?.can_create_rooms || hasRole(user.role, 'moderator');
+      const isAdmin = user.permissions?.can_promote || user.permissions?.can_delete_rooms || hasRole(user.role, 'superadmin');
 
       const lines = ["Available commands for your role:\n"];
 
@@ -53,13 +53,14 @@ const COMMANDS = {
     minRole: "member",
     async handler({ roomId }) {
       const members = await db.prepare(
-        `SELECT u.username, u.role FROM users u
+        `SELECT u.username, u.display_name, r.name as role_name FROM users u
          INNER JOIN room_members rm ON rm.user_id = u.id
-         WHERE rm.room_id = ? ORDER BY u.role DESC, u.username`
+         LEFT JOIN roles r ON r.id = u.role_id
+         WHERE rm.room_id = ? ORDER BY r.level DESC, u.username`
       ).all(roomId);
       const lines = [
         "Members in this room:",
-        ...members.map(m => `  ${m.username} [${m.role}]`),
+        ...members.map(m => `  ${m.display_name || m.username} (${m.username}) [${m.role_name || 'member'}]`),
       ];
       return { success: true, systemMessage: lines.join("\n"), broadcast: false };
     },
@@ -73,14 +74,21 @@ const COMMANDS = {
       if (!targetUsername)
         return { success: false, systemMessage: "Usage: /kick <username>", broadcast: false };
 
+      // Check permission: use permissions object or fall back to role check
+      if (!user.permissions?.can_kick && !hasRole(user.role, 'moderator'))
+        return { success: false, systemMessage: "You do not have permission to kick users.", broadcast: false };
+
       const target = await db.prepare(
-        "SELECT id, username, role FROM users WHERE username = ?"
+        "SELECT u.id, u.username, u.role, r.level as role_level FROM users u LEFT JOIN roles r ON r.id = u.role_id WHERE u.username = ?"
       ).get(targetUsername);
       if (!target)
         return { success: false, systemMessage: `User "${targetUsername}" not found.`, broadcast: false };
       if (target.id === user.id)
         return { success: false, systemMessage: "You cannot kick yourself.", broadcast: false };
-      if (hasRole(target.role, user.role) && target.role !== "member")
+
+      const targetLevel = target.role_level !== undefined ? target.role_level : 0;
+      const userLevel = user.role_level !== undefined ? user.role_level : 0;
+      if (targetLevel >= userLevel && target.role !== "member")
         return { success: false, systemMessage: "You cannot kick someone with equal or higher authority.", broadcast: false };
 
       await db.prepare(
@@ -93,6 +101,7 @@ const COMMANDS = {
         success: true,
         systemMessage: `${user.username} removed ${targetUsername} from the room.`,
         broadcast: true,
+        memberLeft: { roomId, userId: target.id, username: target.username },
       };
     },
   },
@@ -101,26 +110,41 @@ const COMMANDS = {
     description: "Change a user's role",
     minRole: "superadmin",
     async handler({ user, args }) {
-      const [targetUsername, newRole] = args;
-      if (!targetUsername || !newRole)
+      const [targetUsername, newRoleName] = args;
+      if (!targetUsername || !newRoleName)
         return { success: false, systemMessage: "Usage: /promote <username> <member|moderator|superadmin>", broadcast: false };
-      if (!["member", "moderator", "superadmin"].includes(newRole))
-        return { success: false, systemMessage: "Invalid role. Choose: member, moderator, superadmin", broadcast: false };
+
+      // Check permission
+      if (!user.permissions?.can_promote && !hasRole(user.role, 'superadmin'))
+        return { success: false, systemMessage: "You do not have permission to promote users.", broadcast: false };
+
+      // Look up the role by name from roles table
+      const newRole = await db.prepare("SELECT id, name, color FROM roles WHERE name = ?").get(newRoleName);
+      if (!newRole)
+        return { success: false, systemMessage: `Invalid role "${newRoleName}". Check available roles.`, broadcast: false };
 
       const target = await db.prepare(
-        "SELECT id, username FROM users WHERE username = ?"
+        "SELECT u.id, u.username, u.display_name FROM users u WHERE u.username = ?"
       ).get(targetUsername);
       if (!target)
         return { success: false, systemMessage: `User "${targetUsername}" not found.`, broadcast: false };
       if (target.id === user.id)
         return { success: false, systemMessage: "You cannot change your own role.", broadcast: false };
 
-      await db.prepare("UPDATE users SET role = ? WHERE id = ?").run(newRole, target.id);
+      // Update both role (text) and role_id
+      await db.prepare("UPDATE users SET role = ?, role_id = ? WHERE id = ?").run(newRole.name, newRole.id, target.id);
 
       return {
         success: true,
-        systemMessage: `${targetUsername} has been promoted to ${newRole}.`,
+        systemMessage: `${targetUsername} has been promoted to ${newRoleName}.`,
         broadcast: true,
+        memberUpdated: {
+          userId: target.id,
+          username: target.username,
+          display_name: target.display_name,
+          role_name: newRole.name,
+          role_color: newRole.color,
+        },
       };
     },
   },
@@ -133,6 +157,10 @@ const COMMANDS = {
       if (!name)
         return { success: false, systemMessage: "Usage: /createroom <name> [description]", broadcast: false };
 
+      // Check permission
+      if (!user.permissions?.can_create_rooms && !hasRole(user.role, 'moderator'))
+        return { success: false, systemMessage: "You do not have permission to create rooms.", broadcast: false };
+
       const slug = name.toLowerCase().replace(/[^a-z0-9-]/g, "-");
       const existing = await db.prepare("SELECT id FROM rooms WHERE name = ?").get(slug);
       if (existing)
@@ -144,18 +172,16 @@ const COMMANDS = {
         "INSERT INTO rooms (id, name, description, created_by) VALUES (?, ?, ?, ?)"
       ).run(roomId, slug, description, user.id);
 
-      const allUsers = await db.prepare("SELECT id FROM users").all();
-      for (const u of allUsers) {
-        await db.prepare(
-          "INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
-        ).run(roomId, u.id);
-      }
+      // Only add creator as member
+      await db.prepare(
+        "INSERT INTO room_members (room_id, user_id) VALUES (?, ?) ON CONFLICT DO NOTHING"
+      ).run(roomId, user.id);
 
       return {
         success: true,
         systemMessage: `Room #${slug} has been created.`,
         broadcast: true,
-        newRoom: { id: roomId, name: slug, description },
+        newRoom: { id: roomId, name: slug, description, created_by: user.username, member_count: 1 },
       };
     },
   },
@@ -163,10 +189,14 @@ const COMMANDS = {
   deleteroom: {
     description: "Delete a room",
     minRole: "superadmin",
-    async handler({ args }) {
+    async handler({ user, args }) {
       const [name] = args;
       if (!name)
         return { success: false, systemMessage: "Usage: /deleteroom <name>", broadcast: false };
+
+      // Check permission
+      if (!user.permissions?.can_delete_rooms && !hasRole(user.role, 'superadmin'))
+        return { success: false, systemMessage: "You do not have permission to delete rooms.", broadcast: false };
 
       const room = await db.prepare("SELECT id, is_default FROM rooms WHERE name = ?").get(name);
       if (!room)
@@ -190,10 +220,14 @@ const COMMANDS = {
   topic: {
     description: "Update room description",
     minRole: "moderator",
-    async handler({ args, roomId }) {
+    async handler({ user, args, roomId }) {
       const description = args.join(" ");
       if (!description)
         return { success: false, systemMessage: "Usage: /topic <new description>", broadcast: false };
+
+      // Check permission
+      if (!user.permissions?.can_change_topic && !hasRole(user.role, 'moderator'))
+        return { success: false, systemMessage: "You do not have permission to change topics.", broadcast: false };
 
       await db.prepare("UPDATE rooms SET description = ? WHERE id = ?").run(description, roomId);
       return {
@@ -220,7 +254,12 @@ async function executeCommand({ content, user, roomId, io }) {
     };
   }
 
-  if (!hasRole(user.role, handler.minRole)) {
+  // Check permission: use user.permissions or user.role_level if available, fallback to hasRole
+  const userLevel = user.role_level !== undefined ? user.role_level : -1;
+  const requiredLevel = { member: 0, moderator: 1, superadmin: 2 }[handler.minRole] ?? 99;
+  const hasLevelAccess = userLevel >= requiredLevel;
+
+  if (!hasLevelAccess && !hasRole(user.role, handler.minRole)) {
     return {
       success: false,
       systemMessage: `You do not have permission to use "/${cmd}".`,
