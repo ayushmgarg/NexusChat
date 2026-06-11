@@ -6,6 +6,16 @@ const { v4: uuidv4 } = require('uuid');
 const DATABASE_URL = process.env.DATABASE_URL;
 
 let pool;
+pool = new Pool({
+  connectionString: DATABASE_URL,
+  ssl: { rejectUnauthorized: false },
+  family: 4,
+  max: 10,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+// after pool is created
+setInterval(() => pool.query('SELECT 1').catch(() => {}), 60000 * 4);
 
 if (DATABASE_URL) {
   pool = new Pool({
