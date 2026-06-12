@@ -875,20 +875,32 @@ document.addEventListener('click', () => {
   }
 }, { capture: true });
 
+// ── Custom notif sound ──
+// To use MP3: put your file in public/ folder as notif.mp3
+// then uncomment the MP3 block and comment out the oscillator block
+
 function playNotifSound() {
   if (S.muted) return;
   try {
-    const ctx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.connect(gain);
-    gain.connect(ctx.destination);
-    osc.frequency.setValueAtTime(880, ctx.currentTime);
-    osc.frequency.setValueAtTime(1200, ctx.currentTime + 0.1);
-    gain.gain.setValueAtTime(0.15, ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.3);
-    osc.start(ctx.currentTime);
-    osc.stop(ctx.currentTime + 0.3);
+    // MP3 version (uncomment to use):
+     const audio = new Audio('/anime-ahh.mp3');
+    audio.volume = 0.5;
+     audio.play().catch(() => {});
+    return;
+
+    // Oscillator version (default):
+    // if (!_audioCtx) return;
+    // if (_audioCtx.state === 'suspended') _audioCtx.resume();
+    // const osc = _audioCtx.createOscillator();
+    // const gain = _audioCtx.createGain();
+    // osc.connect(gain);
+    // gain.connect(_audioCtx.destination);
+    // osc.frequency.setValueAtTime(880, _audioCtx.currentTime);
+    // osc.frequency.setValueAtTime(1200, _audioCtx.currentTime + 0.1);
+    // gain.gain.setValueAtTime(0.15, _audioCtx.currentTime);
+    // gain.gain.exponentialRampToValueAtTime(0.001, _audioCtx.currentTime + 0.3);
+    // osc.start(_audioCtx.currentTime);
+    // osc.stop(_audioCtx.currentTime + 0.3);
   } catch(e) {}
 }
 
