@@ -550,6 +550,9 @@ kbd{background:var(--bg-elevated);border:1px solid var(--border);border-radius:3
           <button class="send-btn" id="send-btn">&#x2191;</button>
         </div>
         <div id="emoji-picker-container" style="display:none;position:absolute;bottom:70px;left:10px;z-index:100;"></div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button class="attach-btn" id="atall-btn" title="Mention all" style="font-size:11px;font-weight:700;padding:2px 8px;width:auto;height:auto">@all</button>
+        </div>
         <div class="input-hint"><kbd>Enter</kbd> send &nbsp;|&nbsp; <kbd>Shift+Enter</kbd> newline &nbsp;|&nbsp; <kbd>@</kbd> mention</div>
       </div>
     </div>
@@ -791,6 +794,15 @@ let S = {
   allRoles: [],
 };
 
+document.getElementById('atall-btn').addEventListener('click', () => {
+  const input = document.getElementById('msg-input');
+  const pos = input.selectionStart || input.value.length;
+  const val = input.value;
+  input.value = val.slice(0, pos) + '@all ' + val.slice(pos);
+  input.focus();
+  input.selectionStart = input.selectionEnd = pos + 5;
+});
+
 // ── IndexedDB Cache ────────────────────────────────────────────────
 const IDB = {
   db: null,
@@ -918,6 +930,7 @@ function renderContent(text) {
     const isSelf = username === S.user?.username;
     return `<span class="mention${isSelf ? ' mention-self' : ''}">${match}</span>`;
   });
+  html = html.replace(/@all\b/g, '<span class="mention" style="background:rgba(255,77,106,.15);color:var(--red)">@all</span>');
   return html;
 }
 
