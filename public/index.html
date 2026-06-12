@@ -740,6 +740,15 @@ kbd{background:var(--bg-elevated);border:1px solid var(--border);border-radius:3
   <div class="ctx-item ctx-danger" data-action="kick">&#x1F462; Kick from Channel</div>
 </div>
 
+ <!-- GIF Modal -->
+  <div class="modal-ov hidden" id="gif-modal">
+    <div class="modal" style="width:400px;max-height:500px;overflow:hidden;display:flex;flex-direction:column">
+      <div class="modal-head"><span>Send a GIF</span><button class="modal-close" onclick="document.getElementById('gif-modal').classList.add('hidden')">×</button></div>
+      <input id="gif-search" class="modal-input" placeholder="Search GIFs..." style="margin:12px"/>
+      <div id="gif-results" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;overflow-y:auto;padding:0 12px 12px;flex:1"></div>
+    </div>
+  </div>
+
 <script>
 // ═══════════════════════════════════════════════════════════════════
 //  NexusChat Client — Full Rewrite
@@ -2295,14 +2304,6 @@ function renderTyping() {
     connectSocket();
   } catch { localStorage.removeItem('nc_token'); }
 })();
-
-  <div class="modal-ov hidden" id="gif-modal">
-  <div class="modal" style="width:400px;max-height:500px;overflow:hidden;display:flex;flex-direction:column">
-    <div class="modal-head"><span>Send a GIF</span><button class="modal-close" onclick="document.getElementById('gif-modal').classList.add('hidden')">×</button></div>
-    <input id="gif-search" class="modal-input" placeholder="Search GIFs..." style="margin:12px"/>
-    <div id="gif-results" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;overflow-y:auto;padding:0 12px 12px;flex:1"></div>
-  </div>
-</div>
 </script>
 </body>
 </html>
