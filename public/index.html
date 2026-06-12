@@ -27,6 +27,12 @@ html,body{height:100%;overflow:hidden;background:var(--bg-base);color:var(--text
 .file-dl-btn { background:none; border:1px solid #444; color:#ccc; border-radius:4px; cursor:pointer; padding:2px 8px; margin-left:8px; font-size:12px; }
 .file-dl-btn:hover { color:#fff; border-color:#aaa; }
 
+.modal-head{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border);font-family:var(--mono);font-size:14px;font-weight:600}
+.modal-close{background:none;border:none;color:var(--text3);font-size:20px;cursor:pointer;padding:0 4px;line-height:1}
+.modal-close:hover{color:var(--text)}
+.modal-input{background:var(--bg-elevated);border:1px solid var(--border);border-radius:4px;padding:8px 12px;font-family:var(--mono);font-size:13px;color:var(--text);outline:none;width:calc(100% - 24px)}
+.modal-input:focus{border-color:var(--accent)}
+
 /* ── Auth ── */
 #auth-screen{
   display:flex;align-items:center;justify-content:center;height:100vh;
@@ -1381,29 +1387,39 @@ document.getElementById('gif-btn').addEventListener('click', () => {
 let gifDebounce;
 document.getElementById('gif-search').addEventListener('input', (e) => {
   clearTimeout(gifDebounce);
-  gifDebounce = setTimeout(() => loadGifs(e.target.value || 'trending'), 400);
+  const q = e.target.value.trim();
+  gifDebounce = setTimeout(() => loadGifs(q || 'trending'), 400);
 });
 async function loadGifs(query) {
-  const endpoint = query === 'trending'
-    ? `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=12`
-    : `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(query)}&limit=12`;
-  const res = await fetch(endpoint);
-  const data = await res.json();
   const container = document.getElementById('gif-results');
-  container.innerHTML = '';
-  for (const result of data.data) {
-    const preview = result.images.fixed_height_small.url;
-    const full = result.images.original.url;
-    const img = document.createElement('img');
-    img.src = preview;
-    img.style.cssText = 'width:100%;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:border-color .1s';
-    img.onmouseover = () => img.style.borderColor = 'var(--accent)';
-    img.onmouseout = () => img.style.borderColor = 'transparent';
-    img.onclick = () => {
-      document.getElementById('gif-modal').classList.add('hidden');
-      S.socket.emit('message:send', { roomId: S.currentRoom.id, content: full });
-    };
-    container.appendChild(img);
+  container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3);font-family:var(--mono);font-size:12px">Loading...</div>';
+  const endpoint = query === 'trending'
+    ? `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=20&rating=g`
+    : `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(query)}&limit=25&rating=g`;
+  try {
+    const res = await fetch(endpoint);
+    const data = await res.json();
+    container.innerHTML = '';
+    if (!data.data?.length) {
+      container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text3)">No GIFs found</div>';
+      return;
+    }
+    for (const result of data.data) {
+      const preview = result.images.fixed_height_small.url;
+      const full = result.images.original.url;
+      const img = document.createElement('img');
+      img.src = preview;
+      img.style.cssText = 'width:100%;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:border-color .1s';
+      img.onmouseover = () => img.style.borderColor = 'var(--accent)';
+      img.onmouseout = () => img.style.borderColor = 'transparent';
+      img.onclick = () => {
+        document.getElementById('gif-modal').classList.add('hidden');
+        S.socket.emit('message:send', { roomId: S.currentRoom.id, content: full });
+      };
+      container.appendChild(img);
+    }
+  } catch(e) {
+    container.innerHTML = '<div style="padding:20px;text-align:center;color:var(--red)">Failed to load GIFs</div>';
   }
 }
 document.getElementById('attach-btn').addEventListener('click', () => {
@@ -2279,7 +2295,6 @@ function renderTyping() {
     connectSocket();
   } catch { localStorage.removeItem('nc_token'); }
 })();
-</script>
 
   <div class="modal-ov hidden" id="gif-modal">
   <div class="modal" style="width:400px;max-height:500px;overflow:hidden;display:flex;flex-direction:column">
@@ -2288,5 +2303,6 @@ function renderTyping() {
     <div id="gif-results" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;overflow-y:auto;padding:0 12px 12px;flex:1"></div>
   </div>
 </div>
+</script>
 </body>
 </html>
