@@ -537,10 +537,13 @@ kbd{background:var(--bg-elevated);border:1px solid var(--border);border-radius:3
         <div id="mention-popup" class="mention-popup hidden"></div>
         <div class="input-wrap">
           <button class="attach-btn" id="attach-btn" title="Attach file">&#x1F4CE;</button>
+          <button class="attach-btn" id="emoji-btn" title="Emoji" style="font-size:16px">&#x1F603;</button>
+          <button class="attach-btn" id="gif-btn" title="GIF" style="font-size:11px;font-weight:700;letter-spacing:-0.5px">GIF</button>
           <input type="file" id="file-input" accept="image/*,.pdf,.txt,.doc,.docx,.zip,.rar,.json,.csv,.xml" style="display:none"/>
           <textarea id="msg-input" rows="1" placeholder="Message — type / for commands"></textarea>
           <button class="send-btn" id="send-btn">&#x2191;</button>
         </div>
+        <div id="emoji-picker-container" style="display:none;position:absolute;bottom:70px;left:10px;z-index:100;"></div>
         <div class="input-hint"><kbd>Enter</kbd> send &nbsp;|&nbsp; <kbd>Shift+Enter</kbd> newline &nbsp;|&nbsp; <kbd>@</kbd> mention</div>
       </div>
     </div>
@@ -880,6 +883,9 @@ function updateTabTitle() {
 }
 
 function renderContent(text) {
+ if (text && text.match(/^https:\/\/media\d*\.giphy\.com\/[^\s]+/)) {
+    return `<img src="${esc(text)}" style="max-width:280px;border-radius:8px;display:block;margin-top:4px"/>`;
+  }
   let html = esc(text);
   html = html.replace(/@([a-zA-Z0-9_-]+)/g, (match, username) => {
     const isSelf = username === S.user?.username;
@@ -1329,6 +1335,77 @@ document.getElementById('toggle-members').addEventListener('click', () => {
 
 // ── File Upload ────────────────────────────────────────────────────
 const fileInput = document.getElementById('file-input');
+// ── Emoji picker ──
+let emojiPickerOpen = false;
+document.getElementById('emoji-btn').addEventListener('click', (e) => {
+  e.stopPropagation();
+  const container = document.getElementById('emoji-picker-container');
+  if (emojiPickerOpen) {
+    container.style.display = 'none';
+    emojiPickerOpen = false;
+    return;
+  }
+  if (!container.firstChild) {
+    const picker = new EmojiMart.Picker({
+      onEmojiSelect: (emoji) => {
+        const input = document.getElementById('msg-input');
+        const pos = input.selectionStart || input.value.length;
+        const val = input.value;
+        input.value = val.slice(0, pos) + emoji.native + val.slice(pos);
+        input.focus();
+        input.selectionStart = input.selectionEnd = pos + emoji.native.length;
+        container.style.display = 'none';
+        emojiPickerOpen = false;
+      },
+      theme: 'dark',
+      set: 'native',
+    });
+    container.appendChild(picker);
+  }
+  container.style.display = 'block';
+  emojiPickerOpen = true;
+});
+document.addEventListener('click', (e) => {
+  if (emojiPickerOpen && !e.target.closest('#emoji-picker-container') && e.target.id !== 'emoji-btn') {
+    document.getElementById('emoji-picker-container').style.display = 'none';
+    emojiPickerOpen = false;
+  }
+});
+
+// ── GIF picker ──
+const GIPHY_KEY = 'vMrlIl4yZRGTiKWUldJPrtY8GYxcEl6c';
+document.getElementById('gif-btn').addEventListener('click', () => {
+  document.getElementById('gif-modal').classList.remove('hidden');
+  loadGifs('trending');
+});
+let gifDebounce;
+document.getElementById('gif-search').addEventListener('input', (e) => {
+  clearTimeout(gifDebounce);
+  gifDebounce = setTimeout(() => loadGifs(e.target.value || 'trending'), 400);
+});
+async function loadGifs(query) {
+  const endpoint = query === 'trending'
+    ? `https://api.giphy.com/v1/gifs/trending?api_key=${GIPHY_KEY}&limit=12`
+    : `https://api.giphy.com/v1/gifs/search?api_key=${GIPHY_KEY}&q=${encodeURIComponent(query)}&limit=12`;
+  const res = await fetch(endpoint);
+  const data = await res.json();
+  const container = document.getElementById('gif-results');
+  container.innerHTML = '';
+  for (const result of data.data) {
+    const preview = result.images.fixed_height_small.url;
+    const full = result.images.original.url;
+    const img = document.createElement('img');
+    img.src = preview;
+    img.style.cssText = 'width:100%;border-radius:6px;cursor:pointer;border:2px solid transparent;transition:border-color .1s';
+    img.onmouseover = () => img.style.borderColor = 'var(--accent)';
+    img.onmouseout = () => img.style.borderColor = 'transparent';
+    img.onclick = () => {
+      document.getElementById('gif-modal').classList.add('hidden');
+      S.socket.emit('message:send', { roomId: S.currentRoom.id, content: full });
+    };
+    container.appendChild(img);
+  }
+}
 document.getElementById('attach-btn').addEventListener('click', () => {
   fileInput.click();
 });
@@ -2203,5 +2280,13 @@ function renderTyping() {
   } catch { localStorage.removeItem('nc_token'); }
 })();
 </script>
+
+  <div class="modal-ov hidden" id="gif-modal">
+  <div class="modal" style="width:400px;max-height:500px;overflow:hidden;display:flex;flex-direction:column">
+    <div class="modal-head"><span>Send a GIF</span><button class="modal-close" onclick="document.getElementById('gif-modal').classList.add('hidden')">×</button></div>
+    <input id="gif-search" class="modal-input" placeholder="Search GIFs..." style="margin:12px"/>
+    <div id="gif-results" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;overflow-y:auto;padding:0 12px 12px;flex:1"></div>
+  </div>
+</div>
 </body>
 </html>
