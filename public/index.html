@@ -2153,6 +2153,11 @@ function connectSocket() {
   });
 
   S.socket.on('message:new', msg => {
+    if (msg.content?.includes('@all') && msg.user_id !== S.user?.id) {
+    S.unreadMentions[msg.room_id] = (S.unreadMentions[msg.room_id] || 0) + 1;
+    playNotifSound();
+    toast(`@all mention in #${S.rooms.find(r=>r.id===msg.room_id)?.name || 'channel'}`, 'info');
+    }
     if (msg.room_id === S.currentRoom?.id) {
       const near = atBot();
       appendMsg(msg);
