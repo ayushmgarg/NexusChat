@@ -21,6 +21,10 @@
 }
 html,body{height:100%;overflow:hidden;background:var(--bg-base);color:var(--text);font-family:var(--sans)}
 
+/* Document sharing */
+.file-dl-btn { background:none; border:1px solid #444; color:#ccc; border-radius:4px; cursor:pointer; padding:2px 8px; margin-left:8px; font-size:12px; }
+.file-dl-btn:hover { color:#fff; border-color:#aaa; }
+
 /* ── Auth ── */
 #auth-screen{
   display:flex;align-items:center;justify-content:center;height:100vh;
@@ -1098,7 +1102,9 @@ function appendMsg(msg) {
           }
         }, 0);
       } else if (att) {
-        attachHtml = `<div class="msg-attachment msg-file"><span class="file-icon">&#x1F4C4;</span><span>${esc(att.name)}</span><span class="file-size">${formatSize(att.size)}</span></div>`;
+        const fileKey = 'att-' + msg.id;
+        if (att.data) IDB.put(fileKey, att.data).catch(() => {});
+        attachHtml = `<div class="msg-attachment msg-file"><span class="file-icon">&#x1F4C4;</span><span>${esc(att.name)}</span><span class="file-size">${formatSize(att.size)}</span><button class="file-dl-btn" onclick="dlFile('${msg.id}','${esc(att.name)}','${esc(att.type)}')">⬇ Download</button></div>`;
       }
     }
 
@@ -1153,7 +1159,9 @@ function prependMsg(msg) {
           }
         }, 0);
       } else if (att) {
-        attachHtml = `<div class="msg-attachment msg-file"><span class="file-icon">&#x1F4C4;</span><span>${esc(att.name)}</span><span class="file-size">${formatSize(att.size)}</span></div>`;
+        const fileKey = 'att-' + msg.id;
+        if (att.data) IDB.put(fileKey, att.data).catch(() => {});
+        attachHtml = `<div class="msg-attachment msg-file"><span class="file-icon">&#x1F4C4;</span><span>${esc(att.name)}</span><span class="file-size">${formatSize(att.size)}</span><button class="file-dl-btn" onclick="dlFile('${msg.id}','${esc(att.name)}','${esc(att.type)}')">⬇ Download</button></div>`;
       }
     }
 
@@ -2139,6 +2147,24 @@ function connectSocket() {
       renderRoomList();
     }
   });
+}
+
+// Help with document sharing and downloading
+function b64toBlob(b64, type) {
+  const raw = b64.includes(',') ? b64.split(',')[1] : b64;
+  const bin = atob(raw);
+  const arr = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+  return new Blob([arr], { type });
+}
+
+async function dlFile(msgId, name, type) {
+  const data = await IDB.get('att-' + msgId).catch(() => null);
+  if (!data) { alert('File data not available — try reloading the page.'); return; }
+  const url = URL.createObjectURL(b64toBlob(data, type));
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 function renderTyping() {
