@@ -3,9 +3,11 @@
 <head>
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<link rel="icon" type="image/png" href="/logo.png"/>
 <title>NexusChat — Internal Comms</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+<script src="https://cdn.jsdelivr.net/npm/emoji-mart@5.6.0/dist/browser.min.js"></script>
 <script src="/socket.io/socket.io.js"></script>
 <style>
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
@@ -486,7 +488,7 @@ kbd{background:var(--bg-elevated);border:1px solid var(--border);border-radius:3
   <div id="sidebar">
     <div class="sidebar-header">
       <div class="logo-compact">
-        <div class="logo-mark-sm">N</div>
+        <img src="/logo.png" style="width:24px;height:24px;border-radius:4px"/>
         <div class="logo-name">NexusChat</div>
       </div>
       <div class="sidebar-header-actions">
@@ -848,10 +850,17 @@ function formatSize(bytes) {
   return (bytes / 1048576).toFixed(1) + ' MB';
 }
 
+let _audioCtx = null;
+document.addEventListener('click', () => {
+  if (!_audioCtx) {
+    _audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  }
+}, { capture: true });
+
 function playNotifSound() {
   if (S.muted) return;
   try {
-    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const ctx = _audioCtx || new (window.AudioContext || window.webkitAudioContext)();
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.connect(gain);
